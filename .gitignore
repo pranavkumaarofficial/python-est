@@ -160,3 +160,6 @@ test-*.der
 test-*.key
 test-*.p7b
 *.p12
+
+# Claude Code specific
+.claude/
