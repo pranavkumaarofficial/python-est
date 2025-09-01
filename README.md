@@ -21,7 +21,7 @@ Python-EST is a production-ready implementation of the EST (Enrollment over Secu
 
 ```bash
 # Clone repository
-git clone https://github.com/PranavK/python-est.git
+git clone https://github.com/pranavkumaarofficial/python-est.git
 cd python-est
 
 # Install dependencies  
@@ -88,4 +88,4 @@ MIT License - see [LICENSE](LICENSE) file for details.
 3. Make changes and test
 4. Submit pull request
 
-For bugs and feature requests, please use [GitHub Issues](https://github.com/PranavK/python-est/issues).
+For bugs and feature requests, please use [GitHub Issues](https://github.com/pranavkumaarofficial/python-est/issues).
