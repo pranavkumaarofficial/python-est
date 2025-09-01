@@ -17,13 +17,15 @@ def run_command(cmd):
 def setup_certificates():
     """Setup development certificates"""
     print("Setting up development certificates...")
+    print("WARNING: This generates private keys for development only!")
+    print("Do not use these certificates in production!")
     
     # Create certs directory
     os.makedirs('certs', exist_ok=True)
     os.makedirs('certs/issued', exist_ok=True)
     
     # Generate CA key and certificate
-    print("Generating CA certificate...")
+    print("\nGenerating CA certificate...")
     ca_commands = [
         'openssl genrsa -out certs/ca-key.pem 4096',
         'openssl req -new -x509 -key certs/ca-key.pem -out certs/ca-cert.pem -days 3650 -subj "/C=US/ST=CA/L=Test/O=Test CA/CN=Python-EST Root CA"',
@@ -39,10 +41,17 @@ def setup_certificates():
         if not run_command(cmd):
             return False
     
-    print("Certificates generated successfully!")
-    print("- CA Certificate: certs/ca-cert.pem")
-    print("- Server Certificate: certs/server.crt")
-    print("- Client Certificate: certs/client.crt")
+    print("\n✅ Certificates generated successfully!")
+    print("📁 Files created:")
+    print("   - certs/ca-cert.pem (CA Certificate)")
+    print("   - certs/ca-key.pem (CA Private Key)")
+    print("   - certs/server.crt (Server Certificate)")
+    print("   - certs/server.key (Server Private Key)")
+    print("   - certs/client.crt (Client Certificate)")
+    print("   - certs/client.key (Client Private Key)")
+    print("\n🔒 SECURITY NOTE:")
+    print("   These are development certificates only!")
+    print("   Private keys are stored locally and excluded from git.")
     return True
 
 if __name__ == '__main__':

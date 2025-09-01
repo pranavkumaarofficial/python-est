@@ -7,7 +7,7 @@ import sys
 import os
 import argparse
 import configparser
-from python_est.core.secureserver import ESTServer
+from python_est.core.secureserver import SecureServer
 
 def main():
     parser = argparse.ArgumentParser(description='Python-EST Server')
@@ -17,18 +17,24 @@ def main():
                        help='Enable debug mode')
     args = parser.parse_args()
     
-    # Load configuration
+    # Check configuration file exists
     if not os.path.exists(args.config):
         print(f"Error: Configuration file '{args.config}' not found")
         sys.exit(1)
     
+    # Load config to get port for display
     config = configparser.ConfigParser()
     config.read(args.config)
+    port = config.get('Daemon', 'port', fallback='8443')
+    address = config.get('Daemon', 'address', fallback='0.0.0.0')
     
-    # Start EST server
+    # Import EST handler
+    from python_est.core.est_handler import ESTSrvHandler
+    
+    # Start EST server  
     try:
-        server = ESTServer(config, debug=args.debug)
-        print(f"Starting Python-EST server on port {config.get('Daemon', 'port', fallback='8443')}")
+        server = SecureServer((address, int(port)), ESTSrvHandler, cfg_file=args.config)
+        print(f"Starting Python-EST server on {address}:{port}")
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nShutting down Python-EST server...")

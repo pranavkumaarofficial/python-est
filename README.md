@@ -22,7 +22,7 @@ cd python-est
 # Install dependencies  
 pip install -r requirements.txt
 
-# Generate development certificates
+# Generate development certificates (creates local private keys)
 python setup_certs.py
 
 # Start server

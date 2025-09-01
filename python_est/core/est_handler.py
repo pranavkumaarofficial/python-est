@@ -6,8 +6,8 @@ import subprocess
 import importlib
 from http.server import BaseHTTPRequestHandler
 # pylint: disable=E0401
-from est_proxy.helper import config_load, ca_handler_get, logger_setup # ,b64_encode, cert_san_get, cert_extensions_get, cert_eku_get
-from est_proxy.version import __version__
+from python_est.core.helper import config_load, ca_handler_get, logger_setup # ,b64_encode, cert_san_get, cert_extensions_get, cert_eku_get
+from python_est.core.version import __version__
 
 class ESTSrvHandler(BaseHTTPRequestHandler):
     """ serverside of est protocol handler """

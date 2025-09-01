@@ -7,7 +7,7 @@ from http.server import HTTPServer
 from tlslite.api import TLSSocketServerMixIn, parsePEMKey, X509CertChain, TLSLocalAlert, TLSRemoteAlert, TLSError, AlertDescription
 # from tlslite.utils.compat import b2a_hex, a2b_hex
 # pylint: disable=E0401
-from est_proxy.helper import config_load, logger_setup, hssrv_options_get, connection_log, uts_now
+from python_est.core.helper import config_load, logger_setup, hssrv_options_get, connection_log, uts_now
 
 class SecureServer(ThreadingMixIn, TLSSocketServerMixIn, HTTPServer):
     """ Secure server """
