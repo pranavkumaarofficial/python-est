@@ -2,6 +2,11 @@
 
 **Enterprise EST (RFC 7030) Protocol Server in Python**
 
+🔐 Enterprise EST (RFC 7030) protocol server in Python. Secure certificate enrollment, multi-CA support, TLS 1.3, production-ready PKI solution. 
+
+
+Topics: est-protocol, rfc7030, pki, certificate-management,tls, openssl, enterprise-security, python, cryptography, certificate-authority, iot-security, zero-trust, mtls, pkcs7, certificate-enrollment.
+
 Python-EST is a production-ready implementation of the EST (Enrollment over Secure Transport) protocol that enables secure certificate enrollment, renewal, and CA certificate distribution for enterprise PKI infrastructure.
 
 ## Features
