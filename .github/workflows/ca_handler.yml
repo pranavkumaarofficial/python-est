@@ -1,0 +1,127 @@
+name: 'CAhandler tests'
+on:
+  push:
+  pull_request:
+    branches: [ devel ]
+  schedule:
+    # * is a special character in YAML so you have to quote this string
+    - cron:  '0 2 * * 6'
+
+jobs:
+  est_proto_libest:
+    name: "CAhandler tests"
+    runs-on: ubuntu-latest
+    steps:
+    - name: "checkout GIT"
+      uses: actions/checkout@v2
+
+    - name: "[ PREPARE ] Build docker-compose"
+      working-directory: examples/Docker/
+      run: |
+        sudo mkdir -p data
+        docker network create est
+        docker-compose up -d
+        docker-compose logs
+
+    - name: "[ PREPARE ] estclient config"
+      run: |
+        sudo mkdir /tmp/certs
+        sudo chmod 777 /tmp/certs
+        sudo cp .github/wf_data/certs/cacerts.pem /tmp/certs
+        sudo cp .github/wf_data/certs/est*.pem /tmp/certs
+        (umask 000; openssl genrsa 4096 > /tmp/certs/4096.pem)
+        (umask 000; openssl genrsa 2048 > /tmp/certs/2048.pem)
+
+    - name: "[ Test ] generate csr(s) "
+      run: |
+        docker run -v /tmp/certs:/tmp/certs --network est grindsa/estclient estclient.globalsign csr -key /tmp/certs/2048.pem -cn 'est-clt-2048' -out /tmp/certs/csr2048.pem
+
+    - name: "[ PREPARE ] configure xca_handler"
+      run: |
+        sudo cp .github/wf_data/est_proxy_basic.cfg examples/Docker/data/est_proxy.cfg
+        sudo cp -R .github/wf_data/certs examples/Docker/data/
+        sudo cp -R .github/wf_data/xca examples/Docker/data/
+        sudo chmod 777 examples/Docker/data/est_proxy.cfg
+        sudo cat .github/wf_data/est_proxy_clientauth.cfg >> examples/Docker/data/est_proxy.cfg
+        sudo cat .github/wf_data/est_proxy_xca.cfg >> examples/Docker/data/est_proxy.cfg
+        cd examples/Docker/
+        docker-compose restart
+        docker-compose logs
+
+    - name: "[ Test ] xca_ca_handler cacerts"
+      run: |
+        docker run -v /tmp/certs:/tmp/certs --network est grindsa/estclient estclient.globalsign cacerts -server est-proxy.est:17443 -insecure -out /tmp/certs/xca_ca.pem
+        sudo openssl x509 -outform der -in /tmp/certs/xca_ca.pem -out /tmp/certs/xca_ca.der
+
+    - name: "[ Test ] xca_ca_handler simpleenroll"
+      run: |
+        docker run -v /tmp/certs:/tmp/certs --network est grindsa/estclient estclient.globalsign enroll -server est-proxy.est:17443 -explicit /tmp/certs/cacerts.pem -csr /tmp/certs/csr2048.pem -out /tmp/certs/xca-cert.pem -certs /tmp/certs/estclient.crt.pem -key /tmp/certs/estclient.key.pem
+        sudo openssl x509 -outform der -in /tmp/certs/xca-cert.pem -out /tmp/certs/xca-cert.der
+        sudo ls -la /tmp/certs
+
+    - name: "[ PREPARE ] configure certifier_ca_handler"
+      run: |
+        sudo cp .github/wf_data/est_proxy_basic.cfg examples/Docker/data/est_proxy.cfg
+        sudo chmod 777 examples/Docker/data/est_proxy.cfg
+        sudo cat .github/wf_data/est_proxy_clientauth.cfg >> examples/Docker/data/est_proxy.cfg
+        sudo echo "[CAhandler]" >> examples/Docker/data/est_proxy.cfg
+        sudo echo "handler_file: examples/ca_handler/certifier_ca_handler.py" >> examples/Docker/data/est_proxy.cfg
+        sudo echo "api_host: ${{ secrets.NCM_API_HOST }}" >> examples/Docker/data/est_proxy.cfg
+        sudo echo "api_user: ${{ secrets.NCM_API_USER }}" >> examples/Docker/data/est_proxy.cfg
+        sudo echo "api_password: ${{ secrets.NCM_API_PASSWORD }}" >> examples/Docker/data/est_proxy.cfg
+        sudo echo "ca_name: ${{ secrets.NCM_CA_NAME }}" >> examples/Docker/data/est_proxy.cfg
+        sudo echo "ca_bundle: ${{ secrets.NCM_CA_BUNDLE }}" >> examples/Docker/data/est_proxy.cfg
+        cd examples/Docker/
+        docker-compose restart
+        docker-compose logs
+
+    - name: "[ Test ] certifier_ca_handler cacerts"
+      run: |
+        docker run -v /tmp/certs:/tmp/certs --network est grindsa/estclient estclient.globalsign cacerts -server est-proxy.est:17443 -insecure -out /tmp/certs/certifier_ca.pem
+        sudo openssl x509 -outform der -in /tmp/certs/certifier_ca.pem -out /tmp/certs/certifier_ca.der
+
+    - name: "[ Test ] certifier_ca_handler simpleenroll"
+      run: |
+        docker run -v /tmp/certs:/tmp/certs --network est grindsa/estclient estclient.globalsign enroll -server est-proxy.est:17443 -explicit /tmp/certs/cacerts.pem -csr /tmp/certs/csr2048.pem -out /tmp/certs/certifier-cert.pem -certs /tmp/certs/estclient.crt.pem -key /tmp/certs/estclient.key.pem
+        sudo openssl x509 -outform der -in /tmp/certs/certifier-cert.pem -out /tmp/certs/certifier-cert.der
+        sudo ls -la /tmp/certs
+
+    - name: "[ PREPARE ] configure openssl_handler"
+      run: |
+        sudo cp .github/wf_data/est_proxy_basic.cfg examples/Docker/data/est_proxy.cfg
+        sudo cp -R .github/wf_data/certs examples/Docker/data/
+        sudo cp -R .github/wf_data/openssl examples/Docker/data/
+        sudo chmod 777 examples/Docker/data/est_proxy.cfg
+        sudo cat .github/wf_data/est_proxy_clientauth.cfg >> examples/Docker/data/est_proxy.cfg
+        sudo cat .github/wf_data/est_proxy_opensslca.cfg >> examples/Docker/data/est_proxy.cfg
+        cd examples/Docker/
+        docker-compose restart
+        docker-compose logs
+
+    - name: "[ Test ] openssl_ca_handler cacerts"
+      run: |
+        docker run -v /tmp/certs:/tmp/certs --network est grindsa/estclient estclient.globalsign cacerts -server est-proxy.est:17443 -insecure -out /tmp/certs/openssl_ca.pem
+        sudo openssl x509 -outform der -in /tmp/certs/openssl_ca.pem -out /tmp/certs/openssl_ca.der
+
+    - name: "[ Test ] openssl_ca_handler simpleenroll"
+      run: |
+        docker run -v /tmp/certs:/tmp/certs --network est grindsa/estclient estclient.globalsign enroll -server est-proxy.est:17443 -explicit /tmp/certs/cacerts.pem -csr /tmp/certs/csr2048.pem -out /tmp/certs/openssl-cert.pem -certs /tmp/certs/estclient.crt.pem -key /tmp/certs/estclient.key.pem
+        sudo openssl x509 -outform der -in /tmp/certs/openssl-cert.pem -out /tmp/certs/openssl-cert.der
+        sudo ls -la /tmp/certs
+
+    - name: "[ * ] collecting test logs"
+      if: ${{ failure() }}
+      run: |
+        mkdir -p ${{ github.workspace }}/artifact/upload
+        sudo cp -rp examples/Docker/data/ ${{ github.workspace }}/artifact/data/
+        sudo cp -rp /tmp/certs ${{ github.workspace }}/artifact/data/tmp_certs
+        cd examples/Docker
+        docker-compose logs > ${{ github.workspace }}/artifact/docker-compose.log
+        sudo tar -C ${{ github.workspace }}/artifact/ -cvzf ${{ github.workspace }}/artifact/upload/artifact.tar.gz docker-compose.log data
+
+    - name: "[ * ] uploading artificates"
+      uses: actions/upload-artifact@v2
+      if: ${{ failure() }}
+      with:
+        name: est_proto_curl.tar.gz
+        path: ${{ github.workspace }}/artifact/upload/

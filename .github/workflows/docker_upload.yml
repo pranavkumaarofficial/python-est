@@ -1,0 +1,106 @@
+name: Push images to dockerhub and ghcr.io
+
+on:
+  push:
+    branches:
+      - "main"
+  schedule:
+    # * is a special character in YAML so you have to quote this string
+    - cron:  '0 3 * * 6'
+
+jobs:
+  build_and_upload_images_to_hub:
+    name: Push images to dockerhub and github
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: "Retrieve Version from version.py"
+        run: |
+          echo APP_NAME=$(echo ${{ github.repository }} | awk -F / '{print $2}') >> $GITHUB_ENV
+          echo TAG_NAME=$(cat est_proxy/version.py | grep -i __version__ | head -n 1 | sed 's/__version__ = //g' | sed s/\'//g) >> $GITHUB_ENV
+
+      - run: echo "Repo is at version ${{ steps.est_proxy_ver.outputs.tag }}"
+      - run: echo "APP tag is ${{ env.APP_NAME }}"
+      - run: echo "Latest tag is ${{ env.TAG_NAME }}"
+
+      - name: "Create images"
+        run: |
+          cat examples/Docker/est_proxy/Dockerfile | docker build -t grindsa/est_proxy -t grindsa/est_proxy:latest -t grindsa/est_proxy:${{ env.TAG_NAME }} -t ghcr.io/grindsa/est_proxy -t ghcr.io/grindsa/est_proxy:latest -t ghcr.io/grindsa/est_proxy:${{ env.TAG_NAME }} -f - .  --no-cache
+
+      - name: "upload images to hub.docker.com"
+        run: |
+          docker login -u ${{ secrets.DOCKERHUB_USER }} -p ${{ secrets.DOCKERHUB_TOKEN }}
+          docker push -a grindsa/est_proxy
+
+      - name: "upload images to ghcr.io"
+        run: |
+          docker login ghcr.io -u ${{ secrets.GHCR_USER }} -p ${{ secrets.GHCR_TOKEN }}
+          docker push -a ghcr.io/grindsa/est_proxy
+
+      - name: "delete images from local repository"
+        run: |
+          docker rmi $(docker images grindsa/est_proxy -q) --no-prune --force
+
+  est_proto_curl:
+    name: "auth_curl"
+    needs: [build_and_upload_images_to_hub]
+    runs-on: ubuntu-latest
+    steps:
+    - name: "checkout GIT"
+      uses: actions/checkout@v2
+
+    - name: "[ PREPARE ] est-proxy config"
+      run: |
+        sudo mkdir -p examples/Docker/data
+        docker network create est
+        sudo cp .github/wf_data/est_proxy_basic.cfg examples/Docker/data/est_proxy.cfg
+        sudo cp -R .github/wf_data/certs examples/Docker/data/
+        sudo cp -R .github/wf_data/xca examples/Docker/data/
+        sudo chmod 777 examples/Docker/data/est_proxy.cfg
+        sudo cat .github/wf_data/est_proxy_clientauth.cfg >> examples/Docker/data/est_proxy.cfg
+        sudo cat .github/wf_data/est_proxy_xca.cfg >> examples/Docker/data/est_proxy.cfg
+
+    - name: "[ PREPARE ] est_proxy container"
+      run: |
+        docker run -d -p 17443:17443 --rm -id --network est --name=est-proxy -v "$(pwd)/examples/Docker/data":/usr/local/est_proxy/data/ grindsa/est_proxy:latest
+
+    - name: "[ PREPARE ] est-client config"
+      run: |
+        sudo mkdir /tmp/certs
+        sudo chmod 777 /tmp/certs
+        sudo cp .github/wf_data/certs/cacerts.pem /tmp/certs/
+        sudo cp .github/wf_data/certs/estcl*.pem /tmp/certs/
+        sudo openssl req -nodes -newkey rsa:2048 -keyout /tmp/certs/estclient.key -out /tmp/certs/estclient.csr.pem -subj "/CN=estclient.est"
+        sudo chmod a+r /tmp/certs/estclient.key
+        sudo openssl req -outform der -in /tmp/certs/estclient.csr.pem -out /tmp/certs/estclient.csr.der
+        sudo base64 /tmp/certs/estclient.csr.der > /tmp/certs/estclient.csr
+
+    - name: "[ Test-01 ] enroll certificate via clientauth"
+      run: |
+        echo TST_01RC=$(docker run -v /tmp/certs:/tmp/certs -i --rm --network est curlimages/curl https://est-proxy.est:17443/.well-known/est/simpleenroll --key /tmp/certs/estclient.key.pem --cert /tmp/certs/estclient.crt.pem --cacert /tmp/certs/cacerts.pem --data-binary "@/tmp/certs/estclient.csr" -H "Content-Type:application/pkcs10" -o /tmp/certs/tmp.estclient.p7b  -w "%{http_code}") >> $GITHUB_ENV
+        sudo cat /tmp/certs/tmp.estclient.p7b
+
+    - name: "[ Test-01 ] check result "
+      if: env.TST_01RC != 200
+      run: |
+        echo "Test-01 is ${{ env.TST_01RC }}"
+        exit 1
+
+    - name: "[ * ] collecting test logs"
+      if: ${{ failure() }}
+      run: |
+        mkdir -p ${{ github.workspace }}/artifact/upload
+        sudo cp -rp /tmp/certs/ ${{ github.workspace }}/artifact/tmp_certs/
+        sudo cp -rp examples/Docker/data/ ${{ github.workspace }}/artifact/data/
+        cd examples/Docker
+        docker-compose logs > ${{ github.workspace }}/artifact/docker-compose.log
+        sudo tar -C ${{ github.workspace }}/artifact/ -cvzf ${{ github.workspace }}/artifact/upload/artifact.tar.gz docker-compose.log data tmp_certs
+
+    - name: "[ * ] uploading artificates"
+      uses: actions/upload-artifact@v2
+      if: ${{ failure() }}
+      with:
+        name: est_proto_curl.tar.gz
+        path: ${{ github.workspace }}/artifact/upload/

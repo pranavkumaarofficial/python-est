@@ -1,0 +1,55 @@
+# workflow to run the est_proxy unittest suite
+
+name: Python Tests
+
+on:
+  push:
+  pull_request:
+    branches: [ devel ]
+  schedule:
+    # * is a special character in YAML so you have to quote this string
+    - cron:  '0 2 * * 6'
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python_version: [3.x, 3.8, 3.7, 3.6]
+    name: Python Unittest (${{ matrix.python_version }})
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python_version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python_version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: Python test
+      run: |
+        pytest
+  pylint:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python_version: [3.x, 3.8]
+    name: Pylint test (${{ matrix.python_version }})
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python_version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python_version }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pylint pylint-exit
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: "Pylint folder: est_proxy"          
+        run: |
+          pylint --rcfile=".github/wf_data/pylintrc" est_proxy/ || pylint-exit $?         
+      - name: "Pylint folder: examples/ca_handler"          
+        run: |
+          pylint --rcfile=".github/wf_data/pylintrc" examples/ca_handler/ || pylint-exit $?

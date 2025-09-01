@@ -1,0 +1,85 @@
+name: authentication tests by using curl
+
+on:
+  push:
+  pull_request:
+    branches: [ devel ]
+  schedule:
+    # * is a special character in YAML so you have to quote this string
+    - cron:  '0 2 * * 6'
+
+jobs:
+  est_proto_curl:
+    name: "auth_curl"
+    runs-on: ubuntu-latest
+    steps:
+    - name: "checkout GIT"
+      uses: actions/checkout@v2
+
+    - name: "[ PREPARE ] Build docker-compose"
+      working-directory: examples/Docker/
+      run: |
+        sudo mkdir -p data
+        docker network create est
+        docker-compose up -d
+        docker-compose logs
+
+    - name: "[ PREPARE ] est-proxy config"
+      run: |
+        sudo cp .github/wf_data/est_proxy_basic.cfg examples/Docker/data/est_proxy.cfg
+        sudo cp -R .github/wf_data/certs examples/Docker/data/
+        sudo cp -R .github/wf_data/xca examples/Docker/data/
+        sudo chmod 777 examples/Docker/data/est_proxy.cfg
+        sudo cat .github/wf_data/est_proxy_clientauth.cfg >> examples/Docker/data/est_proxy.cfg
+        sudo cat .github/wf_data/est_proxy_xca.cfg >> examples/Docker/data/est_proxy.cfg
+        cd examples/Docker/
+        docker-compose restart
+        docker-compose logs
+
+    - name: "[ PREPARE ] est-client config"
+      run: |
+        sudo mkdir /tmp/certs
+        sudo chmod 777 /tmp/certs
+        sudo cp .github/wf_data/certs/cacerts.pem /tmp/certs/
+        sudo cp .github/wf_data/certs/estcl*.pem /tmp/certs/
+        sudo openssl req -nodes -newkey rsa:2048 -keyout /tmp/certs/estclient.key -out /tmp/certs/estclient.csr.pem -subj "/CN=estclient.est"
+        sudo chmod a+r /tmp/certs/estclient.key
+        sudo openssl req -outform der -in /tmp/certs/estclient.csr.pem -out /tmp/certs/estclient.csr.der
+        sudo base64 /tmp/certs/estclient.csr.der > /tmp/certs/estclient.csr
+
+    - name: "[ Test-01 ] enroll certificate via clientauth"
+      run: |
+        echo TST_01RC=$(docker run -v /tmp/certs:/tmp/certs -i --rm --network est curlimages/curl https://est-proxy.est:17443/.well-known/est/simpleenroll --key /tmp/certs/estclient.key.pem --cert /tmp/certs/estclient.crt.pem --cacert /tmp/certs/cacerts.pem --data-binary "@/tmp/certs/estclient.csr" -H "Content-Type:application/pkcs10" -o /tmp/certs/tmp.estclient.p7b -w "%{http_code}") >> $GITHUB_ENV
+
+    - name: "[ Test-01 ] check result "
+      if: env.TST_01RC != 200
+      run: |
+        echo "Test-01 is ${{ env.TST_01RC }}"
+        exit 1
+
+    - name: "[ Test-02 ] failed enrollment due to missing clientauth"
+      run: |
+        echo TST_02RC=$(docker run -v /tmp/certs:/tmp/certs -i --rm --network est curlimages/curl https://est-proxy.est:17443/.well-known/est/simpleenroll --silent --cacert /tmp/certs/cacerts.pem --data-binary "@/tmp/certs/estclient.csr" -H "Content-Type:application/pkcs10" -o /tmp/certs/tmp.estclient.p7b -o /dev/null -w "%{http_code}") >> $GITHUB_ENV
+
+    - name: "[ Test-02 ] check result "
+      if: env.TST_02RC != 401
+      run: |
+        echo "Test-02 is ${{ env.TST_02RC }}"
+        exit 1
+
+    - name: "[ * ] collecting test logs"
+      if: ${{ failure() }}
+      run: |
+        mkdir -p ${{ github.workspace }}/artifact/upload
+        sudo cp -rp /tmp/certs/ ${{ github.workspace }}/artifact/tmp_certs/
+        sudo cp -rp examples/Docker/data/ ${{ github.workspace }}/artifact/data/
+        cd examples/Docker
+        docker-compose logs > ${{ github.workspace }}/artifact/docker-compose.log
+        sudo tar -C ${{ github.workspace }}/artifact/ -cvzf ${{ github.workspace }}/artifact/upload/artifact.tar.gz docker-compose.log data tmp_certs
+
+    - name: "[ * ] uploading artificates"
+      uses: actions/upload-artifact@v2
+      if: ${{ failure() }}
+      with:
+        name: est_proto_curl.tar.gz
+        path: ${{ github.workspace }}/artifact/upload/
