@@ -163,3 +163,6 @@ test-*.p7b
 
 # Claude Code specific
 .claude/
+
+#notes file
+notes.md
