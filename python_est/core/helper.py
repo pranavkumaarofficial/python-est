@@ -280,7 +280,7 @@ def hssrv_options_get(logger, config_dic):
             option_dic['sessionCache'] = SessionCache()
             option_dic['alpn'] = [bytearray(b'http/1.1')]
             option_dic['settings'] = hs_settings
-            option_dic['reqCert'] = True
+            option_dic['reqCert'] = False  # Allow bootstrap without client cert
             option_dic['sni'] = None
         else:
             logger.error('Helper.hssrv_options_get(): incomplete Daemon configuration in config file')

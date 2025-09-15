@@ -73,7 +73,7 @@ class SecureServer(ThreadingMixIn, TLSSocketServerMixIn, HTTPServer):
 
         hs_options = hssrv_options_get(self.logger, self.config_dic)
         request_pha = True
-        require_pha = True
+        require_pha = False  # Allow bootstrap connections without client certificates
 
         result = False
         try:

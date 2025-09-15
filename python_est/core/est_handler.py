@@ -61,17 +61,26 @@ class ESTSrvHandler(BaseHTTPRequestHandler):
         return ca_pkcs7
 
     def _auth_check(self):
-        """ split ca_certs """
+        """ check authentication - bootstrap allows SRP only """
         self.logger.debug('ESTSrvHandler._auth_check()')
         authenticated = False
-        if self.connection.session.clientCertChain or self.connection.session.srpUsername:
-            if self.connection.session.clientCertChain:
-                self.logger.info('Client X.509 SHA1 fingerprint: {0}'.format(self.connection.session.clientCertChain.getFingerprint()))
-                # cert_bin = b64_encode(self.logger, self.connection.session.clientCertChain.__dict__['x509List'][0].writeBytes())
-                # serial = cert_eku_get(self.logger, cert_bin)
+
+        # For bootstrap endpoints, only SRP authentication is required
+        if self.path == '/.well-known/est/bootstrap' or self.path.startswith('/bootstrap'):
+            if self.connection.session.srpUsername:
+                self.logger.info('Bootstrap: Client SRP username: {0}'.format(self.connection.session.srpUsername))
+                authenticated = True
             else:
-                self.logger.info('Client SRP username: {0}'.format(self.connection.session.srpUsername))
-            authenticated = True
+                self.logger.debug('Bootstrap: No SRP authentication provided')
+        else:
+            # For regular EST endpoints, require client certificate or SRP
+            if self.connection.session.clientCertChain or self.connection.session.srpUsername:
+                if self.connection.session.clientCertChain:
+                    self.logger.info('Client X.509 SHA1 fingerprint: {0}'.format(self.connection.session.clientCertChain.getFingerprint()))
+                else:
+                    self.logger.info('Client SRP username: {0}'.format(self.connection.session.srpUsername))
+                authenticated = True
+
         self.logger.debug('ESTSrvHandler._auth_check() ended with: {0}'.format(authenticated))
         return authenticated
 
@@ -230,6 +239,112 @@ class ESTSrvHandler(BaseHTTPRequestHandler):
             cmd_list.extend(['--certfile', file_name])
         return cmd_list
 
+    def _bootstrap_page_get(self):
+        """ return bootstrap login page """
+        self.logger.debug('ESTSrvHandler._bootstrap_page_get()')
+
+        html_content = '''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>EST Bootstrap Authentication</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 400px; margin: 100px auto; padding: 20px; }
+        .container { border: 1px solid #ddd; padding: 30px; border-radius: 8px; background: #f9f9f9; }
+        h2 { text-align: center; color: #333; margin-bottom: 30px; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], input[type="password"] {
+            width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;
+        }
+        .btn {
+            width: 100%; padding: 12px; background: #007bff; color: white; border: none;
+            border-radius: 4px; cursor: pointer; font-size: 16px;
+        }
+        .btn:hover { background: #0056b3; }
+        .info { font-size: 12px; color: #666; margin-top: 15px; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>EST Bootstrap Login</h2>
+        <form method="post" action="/bootstrap/login">
+            <div class="form-group">
+                <label for="username">Username:</label>
+                <input type="text" id="username" name="username" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Password:</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            <button type="submit" class="btn">Login & Enroll Certificate</button>
+        </form>
+        <div class="info">
+            This page is for initial certificate enrollment using SRP authentication.<br>
+            After successful enrollment, use certificate-based authentication.
+        </div>
+    </div>
+</body>
+</html>'''
+
+        self.logger.debug('ESTSrvHandler._bootstrap_page_get() ended')
+        return html_content
+
+    def _bootstrap_login_process(self, post_data):
+        """ process bootstrap login form submission """
+        self.logger.debug('ESTSrvHandler._bootstrap_login_process()')
+
+        try:
+            # Parse form data
+            form_data = {}
+            if post_data:
+                post_str = post_data.decode('utf-8')
+                for pair in post_str.split('&'):
+                    if '=' in pair:
+                        key, value = pair.split('=', 1)
+                        # Basic URL decoding
+                        key = key.replace('+', ' ').replace('%20', ' ')
+                        value = value.replace('+', ' ').replace('%20', ' ')
+                        form_data[key] = value
+
+            username = form_data.get('username', '')
+            password = form_data.get('password', '')
+
+            if not username or not password:
+                return (400, 'text/html', 'Username and password required', None)
+
+            # Check if this is an SRP authenticated connection
+            if not self.connection.session.srpUsername:
+                return (401, 'text/html', 'SRP authentication required for bootstrap', None)
+
+            # Verify the SRP username matches the form username
+            if self.connection.session.srpUsername != username:
+                self.logger.warning('Bootstrap: SRP username mismatch: {0} vs {1}'.format(
+                    self.connection.session.srpUsername, username))
+                return (401, 'text/html', 'Authentication failed', None)
+
+            # Generate a simple CSR for the user (in a real implementation, client would provide CSR)
+            success_page = '''<!DOCTYPE html>
+<html>
+<head>
+    <title>Bootstrap Success</title>
+    <style>body { font-family: Arial, sans-serif; text-align: center; margin-top: 100px; }</style>
+</head>
+<body>
+    <h2>✅ Bootstrap Authentication Successful</h2>
+    <p>User: {0}</p>
+    <p>SRP Authentication completed successfully.</p>
+    <p>Next: Submit your CSR to /.well-known/est/simpleenroll with SRP authentication.</p>
+    <a href="/bootstrap">← Back to Bootstrap</a>
+</body>
+</html>'''.format(username)
+
+            return (200, 'text/html', success_page, None)
+
+        except Exception as e:
+            self.logger.error('Bootstrap login processing error: {0}'.format(e))
+            return (500, 'text/html', 'Internal server error', None)
+
     def _set_response(self, code=404, content_type='text/html', clength=0, encoding=None):
         """ set response method """
         self.send_response(code)
@@ -260,6 +375,10 @@ class ESTSrvHandler(BaseHTTPRequestHandler):
             else:
                 code = 500
                 content_type = 'text/html'
+        elif self.path == '/.well-known/est/bootstrap' or self.path == '/bootstrap':
+            code = 200
+            content_type = 'text/html'
+            content = self._bootstrap_page_get()
         else:
             code = 400
             content_type = 'text/html'
@@ -279,6 +398,11 @@ class ESTSrvHandler(BaseHTTPRequestHandler):
         content_type = None
         encoding = None
         code = 400
+
+        # Handle bootstrap login form submission
+        if self.path == '/bootstrap/login':
+            (code, content_type, content, encoding) = self._bootstrap_login_process(data)
+            return (code, content_type, len(content) if content else 0, encoding, content)
 
         # check if connection is poperly authenticated
         connection_authenticated = self._auth_check()
