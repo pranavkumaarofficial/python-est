@@ -263,14 +263,30 @@ def hssrv_options_get(logger, config_dic):
 
     hs_settings = HandshakeSettings()
 
-    #  settings.useExperimentalTackExtension=True
-    # settings.dhParams = dhparam
-    # if ssl3:
-    #    settings.minVersion = (3, 0)
-    #
-    # if cipherlist:
-    #    settings.cipherNames = [item for cipher in cipherlist
-    #                            for item in cipher.split(',')]
+    # Configure TLS versions for better compatibility
+    hs_settings.minVersion = (3, 1)  # TLS 1.0
+    hs_settings.maxVersion = (3, 3)  # TLS 1.2 (avoid TLS 1.3 compatibility issues)
+
+    # Enable compatible cipher suites - use proper cipher names
+    hs_settings.cipherNames = [
+        "aes128", "aes256", "3des"
+    ]
+
+    # Enable compatible MAC algorithms
+    hs_settings.macNames = ["sha", "sha256", "md5"]
+
+    # Configure key exchange methods
+    hs_settings.keyExchangeNames = ["rsa", "dhe_rsa", "srp_sha", "srp_sha_rsa"]
+
+    # Enable more certificate types
+    hs_settings.certificateTypes = ["x509"]
+
+    # Configure DH parameters for better compatibility
+    hs_settings.dhParams = None  # Use default
+
+    # Enable backward compatibility
+    hs_settings.useExperimentalTackExtension = False
+    hs_settings.sendFallbackSCSV = False
 
     option_dic = {}
     if 'Daemon' in config_dic:
