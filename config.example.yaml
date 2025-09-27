@@ -1,0 +1,127 @@
+# Python-EST Server Configuration Example
+# Copy this file to config.yaml and customize for your environment
+
+# Server settings
+server:
+  host: 0.0.0.0                    # Bind to all interfaces
+  port: 8443                       # EST standard port
+  workers: 1                       # Number of worker processes (increase for production)
+  reload: false                    # Auto-reload on code changes (development only)
+  access_log: true                 # Enable HTTP access logging
+  debug: false                     # Enable debug mode (development only)
+
+# TLS/SSL configuration
+tls:
+  cert_file: certs/server.crt      # Server certificate file (PEM format)
+  key_file: certs/server.key       # Server private key file (PEM format)
+  ca_file: certs/ca.crt           # CA certificate for client verification (optional)
+  min_version: TLSv1.2            # Minimum TLS version (TLSv1.2, TLSv1.3)
+  max_version: TLSv1.3            # Maximum TLS version
+  # Optional: Specify allowed cipher suites for enhanced security
+  # ciphers:
+  #   - TLS_AES_256_GCM_SHA384
+  #   - TLS_CHACHA20_POLY1305_SHA256
+  #   - TLS_AES_128_GCM_SHA256
+
+# Certificate Authority settings
+ca:
+  ca_cert: certs/ca.crt           # CA certificate file (PEM format)
+  ca_key: certs/ca.key            # CA private key file (PEM format)
+  ca_key_password: null           # Password for CA private key (if encrypted)
+  cert_validity_days: 365         # Default certificate validity period
+  key_size: 2048                  # RSA key size for issued certificates (2048, 3072, 4096)
+  digest_algorithm: sha256        # Digest algorithm for signing (sha256, sha384, sha512)
+
+# SRP (Secure Remote Password) configuration for bootstrap authentication
+srp:
+  enabled: true                   # Enable SRP authentication for bootstrap
+  user_db: data/srp_users.db     # SRP user database file path
+  salt_length: 32                 # Salt length in bytes
+  verifier_length: 256           # Verifier length in bits
+
+# EST protocol endpoints configuration
+bootstrap_enabled: true          # Enable bootstrap authentication endpoint
+bootstrap_path: /.well-known/est/bootstrap        # Bootstrap endpoint path
+cacerts_path: /.well-known/est/cacerts           # CA certificates endpoint path
+simpleenroll_path: /.well-known/est/simpleenroll # Simple enrollment endpoint path
+simplereenroll_path: /.well-known/est/simplereenroll # Simple re-enrollment endpoint path
+
+# Security settings
+max_cert_lifetime_days: 365      # Maximum allowed certificate lifetime
+require_client_cert: false       # Require client certificates for non-bootstrap endpoints
+rate_limit_enabled: true         # Enable rate limiting to prevent abuse
+rate_limit_requests: 100         # Maximum requests per window
+rate_limit_window: 3600          # Rate limit window in seconds (1 hour)
+
+# Development settings (disable in production)
+development:
+  auto_create_users: false       # Automatically create missing SRP users
+  allow_self_signed: true        # Allow self-signed certificates (development only)
+  cors_enabled: true             # Enable CORS for web interfaces
+
+# Production settings
+production:
+  log_file: logs/est_server.log  # Log file path for production logging
+  log_level: INFO                # Log level (DEBUG, INFO, WARNING, ERROR)
+  max_log_size: 10485760         # Maximum log file size in bytes (10MB)
+  log_backup_count: 5            # Number of log backup files to keep
+
+# Optional: Database configuration for scalable user management
+# database:
+#   enabled: false
+#   type: postgresql              # Database type (postgresql, mysql, sqlite)
+#   host: localhost
+#   port: 5432
+#   database: est_db
+#   username: est_user
+#   password: est_password
+#   pool_size: 10
+#   max_overflow: 20
+
+# Optional: LDAP integration for enterprise authentication
+# ldap:
+#   enabled: false
+#   server: ldap://ldap.example.com
+#   port: 389
+#   use_ssl: false
+#   base_dn: dc=example,dc=com
+#   user_dn: cn=Users,dc=example,dc=com
+#   bind_user: cn=est-service,cn=Users,dc=example,dc=com
+#   bind_password: service_password
+
+# Optional: Webhook notifications for certificate events
+# webhooks:
+#   enabled: false
+#   enrollment_url: https://api.example.com/webhooks/enrollment
+#   renewal_url: https://api.example.com/webhooks/renewal
+#   revocation_url: https://api.example.com/webhooks/revocation
+#   secret: webhook_secret_key
+#   timeout: 30
+
+# Optional: Certificate templates for different device types
+# templates:
+#   default:
+#     validity_days: 365
+#     key_usage:
+#       - digital_signature
+#       - key_encipherment
+#     extended_key_usage:
+#       - client_auth
+#
+#   iot_device:
+#     validity_days: 90
+#     key_size: 2048
+#     key_usage:
+#       - digital_signature
+#     extended_key_usage:
+#       - client_auth
+#
+#   server:
+#     validity_days: 365
+#     key_size: 3072
+#     key_usage:
+#       - digital_signature
+#       - key_encipherment
+#     extended_key_usage:
+#       - server_auth
+#       - client_auth

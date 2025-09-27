@@ -142,27 +142,76 @@ cython_debug/
 # VS Code
 .vscode/
 
-# Python-EST specific
-# Generated certificates (regenerated during setup)
-certs/
-data/
-
-# Configuration with secrets  
+# EST Server specific
+# Configuration files with secrets
+config.yaml
+config.yml
+production.yaml
 *_production.cfg
 *_secrets.cfg
 
-# Debug and temporary files
+# Certificate and key files
+*.crt
+*.key
+*.pem
+*.p12
+*.pfx
+*.csr
+*.p7b
+*.p7c
+*.der
+
+# Certificate directories
+certs/
+certificates/
+ca/
+private/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Log files
+*.log
+logs/
+
+# SRP user database
+srp_users.db
+users.db
+
+# Test artifacts
+test_*.csr
+test_*.key
+test_*.crt
+*_test.*
+finaltest.*
+mydevice.*
+device*.csr
+device*.key
+
+# Debug files
 debug-*.py
 debug-*.pem
 debug-*.p7b
-test-*.csr
-test-*.der
-test-*.key
-test-*.p7b
-*.p12
+
+# IDE files
+.idea/
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Temporary files
+tmp/
+temp/
+.tmp/
 
 # Claude Code specific
 .claude/
 
-#notes file
+# Notes and documentation drafts
 notes.md
+TODO.md

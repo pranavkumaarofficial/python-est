@@ -1,188 +1,294 @@
-# Python-EST
+# Python-EST: RFC 7030 Enrollment over Secure Transport
 
-**Enterprise EST (RFC 7030) Protocol Server in Python**
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
+[![RFC 7030](https://img.shields.io/badge/RFC-7030-orange.svg)](https://tools.ietf.org/html/rfc7030)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Python-EST is a production-ready implementation of the EST (Enrollment over Secure Transport) protocol that enables secure certificate enrollment, renewal, and CA certificate distribution for enterprise PKI infrastructure.
+> **A comprehensive Python implementation of EST (Enrollment over Secure Transport) protocol with FastAPI architecture**
 
-## Features
+## 🚀 Features
 
-- **RFC 7030 Compliant** - Full EST protocol implementation
-- **Bootstrap Authentication** - SRP-based initial certificate enrollment
-- **Multi-CA Support** - OpenSSL, Microsoft ADCS, XCA, NetGuard integrations
-- **TLS 1.3 Security** - Client certificate authentication (mTLS)
-- **Enterprise Ready** - Production-grade logging and error handling
-- **Modular Design** - Pluggable CA handler architecture
+- **📋 Complete RFC 7030 Implementation** - Full EST protocol support with all required endpoints
+- **⚡ FastAPI Architecture** - Async/await performance with type safety
+- **🔐 SRP Bootstrap Authentication** - Secure Remote Password for initial device enrollment
+- **🎨 Beautiful Web Interface** - Minimalistic UI with DM Sans typography and azure theme
+- **📊 Device Tracking & Analytics** - Comprehensive device statistics and monitoring
+- **💾 Certificate Management** - Automatic storage and download of certificates
+- **🌍 IST Timezone Support** - All timestamps displayed in Indian Standard Time
+- **🔄 Auto-Enrollment Flow** - Bootstrap → Enrollment → Certificate Download in one flow
+- **🛡️ Production-Ready Security** - TLS 1.2/1.3, certificate validation, rate limiting
+- **🐳 Docker Support** - Easy deployment with Docker Compose
 
-## Quick Start
+## 🎯 Why Python-EST?
+
+| Feature | Python-EST | Traditional Solutions |
+|---------|------------|-----------------|
+| **Language** | Python 3.8+ | C, Java, older Python |
+| **Architecture** | FastAPI + Async | Synchronous frameworks |
+| **RFC 7030 Compliance** | ✅ Complete | ⚠️ Often partial |
+| **SRP Authentication** | ✅ Built-in | ❌ Manual setup |
+| **Docker Ready** | ✅ Production ready | ⚠️ Complex setup |
+| **Type Safety** | ✅ Pydantic models | ❌ Limited typing |
+| **Web Interface** | ✅ Beautiful UI | ❌ Basic/None |
+
+## 📦 Quick Start
+
+### Installation
 
 ```bash
-# Clone repository
+# Clone the repository
 git clone https://github.com/pranavkumaarofficial/python-est.git
 cd python-est
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Generate development certificates (creates local private keys)
-python setup_certs.py
-
-# Setup SRP bootstrap users (for initial enrollment)
-python create_srp_users.py setup
-
-# Start server
-python main.py -c python_est.cfg
-
-# Test CA certificates endpoint
-curl -k https://localhost:8443/.well-known/est/cacerts
-
-# Access bootstrap login (in browser)
-# https://localhost:8443/bootstrap
+# Or install with Poetry
+poetry install
 ```
 
-## EST Endpoints
+### Basic Usage
 
-### Standard EST Endpoints
-- `GET /.well-known/est/cacerts` - CA certificate distribution
-- `POST /.well-known/est/simpleenroll` - Certificate enrollment
-- `POST /.well-known/est/simplereenroll` - Certificate renewal
-
-### Bootstrap Endpoints (New!)
-- `GET /.well-known/est/bootstrap` - Bootstrap login page
-- `GET /bootstrap` - Alternative bootstrap access
-- `POST /bootstrap/login` - Bootstrap form submission
-
-## Configuration
-
-Edit `python_est.cfg`:
-
-```ini
-[Daemon]
-port = 8443
-cert_file = certs/server.crt
-key_file = certs/server.key
-
-[CAhandler]
-handler_file = python_est/handlers/openssl_ca_handler_fixed.py
-issuing_ca_cert = certs/ca-cert.pem
-issuing_ca_key = certs/ca-key.pem
-
-[SRP]
-userdb = certs/srp_users.db
-
-[Bootstrap]
-enabled = true
-endpoint = /.well-known/est/bootstrap
-```
-
-## Usage Examples
-
-### Bootstrap Authentication (New Clients)
 ```bash
-# Access bootstrap login page in browser
-https://localhost:8443/bootstrap
+# Start the EST server
+python test_server.py
 
-# Demo credentials:
-# Username: testuser | Password: testpass123
-# Username: device001 | Password: SecureP@ss001
-# Username: admin | Password: AdminP@ss456
-
-# Test SRP authentication programmatically
-python test_bootstrap_client.py testuser testpass123
+# Server will start on https://localhost:8445
 ```
 
-### Standard Certificate Operations
+**Access Points:**
+- **Bootstrap UI**: `https://localhost:8445/.well-known/est/bootstrap`
+- **Server Stats**: `https://localhost:8445/`
+- **Fixed Credentials**: `estuser` / `estpass123`
+
+**Complete Flow:**
+1. Navigate to bootstrap page
+2. Enter credentials and device ID
+3. Automatic bootstrap → enrollment → certificate download
+
+### Docker Deployment
+
 ```bash
-# Get CA certificates (no authentication required)
-curl -k https://localhost:8443/.well-known/est/cacerts
+# Quick start with Docker Compose
+docker-compose up -d
 
-# Enroll certificate with existing client certificate
-curl -X POST \
-  --cert certs/client.crt --key certs/client.key \
-  --data-binary @device.csr \
-  -H "Content-Type: application/pkcs10" \
-  https://localhost:8443/.well-known/est/simpleenroll
+# Access at https://localhost:8443
 ```
 
-### SRP User Management
+## 🔧 Configuration
+
+Create a `config.yaml` file:
+
+```yaml
+server:
+  host: 0.0.0.0
+  port: 8443
+
+tls:
+  cert_file: certs/server.crt
+  key_file: certs/server.key
+  min_version: TLSv1.2
+
+ca:
+  ca_cert: certs/ca.crt
+  ca_key: certs/ca.key
+  cert_validity_days: 365
+
+srp:
+  enabled: true
+  user_db: data/srp_users.db
+```
+
+See [`config.example.yaml`](config.example.yaml) for all options.
+
+## 🌐 API Endpoints
+
+### EST Protocol Endpoints (RFC 7030)
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/.well-known/est/cacerts` | GET | CA certificate distribution |
+| `/.well-known/est/bootstrap` | GET | Bootstrap authentication page |
+| `/.well-known/est/simpleenroll` | POST | Certificate enrollment |
+| `/.well-known/est/simplereenroll` | POST | Certificate re-enrollment |
+
+### Management Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/` | GET | Server statistics and device tracking dashboard |
+| `/download/certificate/{device_id}` | GET | Download device certificate |
+| `/download/private-key/{device_id}` | GET | Download device private key |
+| `/api/stats` | GET | Server statistics JSON |
+| `/api/devices` | GET | All devices JSON |
+| `/api/devices/recent` | GET | Recent devices JSON |
+
+## 💻 Client Library Usage
+
+```python
+from python_est.client import ESTClient
+
+# Initialize client
+client = ESTClient("https://your-est-server.com:8443")
+
+# Get CA certificates
+ca_certs = await client.get_ca_certificates()
+
+# Enroll certificate
+csr_pem = generate_csr()  # Your CSR generation
+certificate = await client.enroll_certificate(csr_pem)
+
+# Bootstrap authentication
+await client.authenticate_bootstrap("username", "password")
+```
+
+## 🏗️ Architecture
+
+```mermaid
+graph TB
+    A[Client Device] --> B[EST Server]
+    B --> C[SRP Authenticator]
+    B --> D[Certificate Authority]
+    B --> E[Configuration Manager]
+
+    subgraph "EST Server Components"
+    F[FastAPI Application]
+    G[TLS Handler]
+    H[Bootstrap Interface]
+    I[Enrollment Processor]
+    end
+
+    B --> F
+    F --> G
+    F --> H
+    F --> I
+```
+
+### Key Components
+
+- **FastAPI Server**: Async web framework
+- **SRP Authenticator**: Secure Remote Password implementation
+- **Certificate Manager**: CA operations and certificate lifecycle
+- **TLS Handler**: Secure transport layer management
+- **Configuration System**: Type-safe configuration with Pydantic
+
+## 🔐 Security Features
+
+- **TLS 1.2/1.3 Support** - Modern transport layer security
+- **SRP Authentication** - Zero-knowledge password protocol
+- **Certificate Validation** - Comprehensive CSR and certificate checks
+- **Rate Limiting** - Protection against abuse
+- **Audit Logging** - Security event tracking
+- **Secure Headers** - OWASP recommended security headers
+
+## 📊 Performance
+
+- **Async Architecture** - High concurrency with minimal resource usage
+- **Connection Pooling** - Efficient database and CA connections
+- **Caching** - Smart caching of certificates and configuration
+- **Horizontal Scaling** - Docker Swarm and Kubernetes ready
+
+## 🔄 Post-Enrollment: What's Next?
+
+After successful certificate enrollment, devices can:
+
+### **Certificate Lifecycle Management**
+- **Renewal**: Use `/simplereenroll` before certificate expiration
+- **Revocation**: Check CRL status via `/getcrl` endpoint
+- **CA Updates**: Fetch updated CA certificates via `/cacerts`
+
+### **Operational Usage**
+- **TLS Authentication**: Use certificates for mutual TLS connections
+- **Network Access**: 802.1X authentication with certificate-based validation
+- **VPN Integration**: Certificate-based VPN authentication
+- **API Security**: Mutual TLS for secure API communications
+- **IoT Device Management**: Certificate-based device identity and authentication
+
+### **Enterprise Integration Examples**
+```python
+# Use enrolled certificate for TLS client authentication
+import ssl
+context = ssl.create_default_context()
+context.load_cert_chain('device_cert.pem', 'device_key.pem')
+
+# Establish secure connection
+conn = urllib.request.urlopen('https://api.example.com', context=context)
+```
+
+## 🧪 Testing
+
 ```bash
-# List existing users
-python create_srp_users.py list
+# Start the server
+python test_server.py
 
-# Add new user
-python create_srp_users.py add newuser securepassword123
+# Test the complete EST flow
+curl -k https://localhost:8445/.well-known/est/bootstrap
 
-# Create fresh database with demo users
-python create_srp_users.py setup
+# Integration tests
+python examples/test_est_flow.py
 ```
 
-## Use Cases
+## 📚 Documentation
 
-- **IoT Device Provisioning** - Automated certificate enrollment for devices
-- **Enterprise PKI** - Integration with existing certificate authorities
-- **DevOps Automation** - Certificate lifecycle management
-- **Zero-Trust Security** - mTLS authentication infrastructure
-- **Bootstrap Authentication** - Initial certificate enrollment without existing certificates
+- [Installation Guide](docs/installation.md)
+- [Configuration Reference](docs/configuration.md)
+- [API Documentation](docs/api.md)
+- [Security Best Practices](docs/security.md)
+- [Deployment Guide](docs/deployment.md)
 
-## Backend Logging & Recording
+## 🤝 Contributing
 
-All authentication attempts and certificate operations are logged:
-
-- **SRP Authentication**: Username, fingerprint, session details
-- **Bootstrap Access**: Form submissions, success/failure events
-- **Certificate Operations**: Enrollment, renewal, CA certificate requests
-- **Security Events**: Authentication failures, unauthorized access attempts
-
-Logs are recorded with timestamps and client IP addresses for audit trails.
-
-## Future Scope & Roadmap
-
-### Phase 2: Enhanced Security
-- **Rate Limiting**: Prevent brute force attacks on bootstrap endpoints
-- **Account Lockout**: Temporary lockout after failed attempts
-- **Certificate Lifecycle**: Automatic short-lived bootstrap certificates
-- **Session Management**: Secure session handling and expiration
-
-### Phase 3: Advanced Features
-- **Multi-Factor Authentication**: TOTP/SMS integration for bootstrap
-- **Certificate Templates**: Configurable certificate profiles for different device types
-- **Webhook Integration**: Real-time notifications for certificate events
-- **REST API**: Programmatic access to certificate operations
-
-### Phase 4: Enterprise Integration
-- **LDAP/Active Directory**: Integration with enterprise identity systems
-- **SCEP Support**: Simple Certificate Enrollment Protocol compatibility
-- **High Availability**: Clustered deployment with load balancing
-- **Database Backend**: PostgreSQL/MySQL for scalable user management
-
-### Phase 5: Cloud & Compliance
-- **Cloud Deployment**: Docker containers, Kubernetes support
-- **FIPS 140-2**: Federal compliance for government environments
-- **HSM Integration**: Hardware Security Module support
-- **Audit Compliance**: SOX, HIPAA, PCI-DSS audit trail features
-
-### Development Tools
-- **Certificate Monitoring**: Dashboard for certificate expiration tracking
-- **API Documentation**: OpenAPI/Swagger specification
-- **Testing Framework**: Automated integration testing suite
-- **Performance Monitoring**: Metrics and alerting for production deployments
-
-### Architecture Enhancements
-- **Plugin System**: Third-party CA handler development framework
-- **Configuration Management**: Dynamic configuration without restart
-- **Backup/Recovery**: Automated backup of certificates and configurations
-- **Migration Tools**: Import/export from other PKI systems
-
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## Contributing
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
 1. Fork the repository
-2. Create feature branch
-3. Make changes and test
-4. Submit pull request
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-For bugs and feature requests, please use [GitHub Issues](https://github.com/pranavkumaarofficial/python-est/issues).
+## 📝 License
 
-Topics: est-protocol, rfc7030, pki, certificate-management,tls, openssl, enterprise-security, python, cryptography, certificate-authority, iot-security, zero-trust, mtls, pkcs7, certificate-enrollment.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🚀 Potential Next Steps
+
+### **Enhanced Features**
+- **Certificate Revocation Lists (CRL)** - Implement full CRL management
+- **SCEP Integration** - Add Simple Certificate Enrollment Protocol support
+- **Multiple CA Support** - Support for multiple Certificate Authorities
+- **HSM Integration** - Hardware Security Module support for key storage
+- **Database Backend** - PostgreSQL/MySQL for device and certificate tracking
+
+### **Security Enhancements**
+- **Rate Limiting** - Advanced rate limiting per device/IP
+- **Audit Logging** - Comprehensive security audit trails
+- **RBAC** - Role-based access control for different user types
+- **Certificate Templates** - Pre-defined certificate templates for different device types
+
+### **Operational Features**
+- **Monitoring & Alerting** - Prometheus/Grafana integration
+- **Certificate Expiry Alerts** - Automated certificate renewal notifications
+- **Bulk Operations** - Bulk certificate operations for IoT deployments
+- **REST API Extensions** - Enhanced REST APIs for management operations
+
+### **Enterprise Integration**
+- **LDAP/AD Integration** - Active Directory authentication
+- **SAML/OAuth2** - Modern authentication protocols
+- **Kubernetes Operator** - Native Kubernetes certificate management
+- **Network Policy Integration** - Automated network access control
+
+## 🙏 Acknowledgments
+
+- [RFC 7030](https://tools.ietf.org/html/rfc7030) - EST Protocol Specification
+- [FastAPI](https://fastapi.tiangolo.com/) - Modern Python web framework
+- [Cryptography](https://cryptography.io/) - Python cryptographic library
+- EST community for protocol development and standards
+
+## 🏷️ Keywords
+
+`EST`, `RFC-7030`, `Certificate-Enrollment`, `PKI`, `Python`, `FastAPI`, `TLS`, `SRP-Authentication`, `Certificate-Authority`, `Secure-Transport`, `IoT-Security`, `X.509`, `PKCS10`, `PKCS7`, `Enterprise-PKI`, `Device-Enrollment`, `Bootstrap-Authentication`
+
+---
+
+**⭐ Star this repository if you find it useful!**
