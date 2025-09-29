@@ -272,6 +272,64 @@ class ESTServer:
                 error_html = self._get_bootstrap_error_html("Internal server error")
                 return HTMLResponse(content=error_html, status_code=500)
 
+        @self.app.post("/.well-known/est/bootstrap")
+        async def est_bootstrap(
+            request: Request,
+            credentials: HTTPBasicCredentials = Depends(HTTPBasic())
+        ) -> Response:
+            """
+            EST Bootstrap Enrollment (RFC 7030 Section 4.1)
+
+            Accepts PKCS#10 CSR with HTTP Basic Auth and returns PKCS#7 certificate.
+            This is the proper EST protocol bootstrap endpoint.
+            """
+            try:
+                # Get CSR from request body
+                csr_data = await request.body()
+                if not csr_data:
+                    raise HTTPException(status_code=400, detail="Missing CSR data")
+
+                # Authenticate using HTTP Basic Auth
+                auth_result = await self.srp_auth.authenticate(
+                    credentials.username,
+                    credentials.password
+                )
+                if not auth_result.success:
+                    raise HTTPException(status_code=401, detail="Authentication failed")
+
+                # Process bootstrap enrollment with CSR
+                result = await self.ca.bootstrap_enrollment(csr_data, credentials.username)
+
+                # Track the bootstrap
+                client_ip = request.client.host if request.client else "unknown"
+                user_agent = request.headers.get("user-agent")
+
+                self.device_tracker.track_bootstrap(
+                    device_id=f"est-{credentials.username}-{result.serial_number}",
+                    username=credentials.username,
+                    ip_address=client_ip,
+                    user_agent=user_agent,
+                    bootstrap_cert_serial=result.serial_number
+                )
+
+                # Return PKCS#7 certificate with proper headers
+                headers = {
+                    "Content-Type": "application/pkcs7-mime",
+                    "Content-Transfer-Encoding": "base64"
+                }
+
+                return Response(
+                    content=result.certificate_pkcs7,
+                    headers=headers,
+                    status_code=200
+                )
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"EST bootstrap enrollment failed: {e}")
+                raise HTTPException(status_code=500, detail="Bootstrap enrollment failed")
+
         @self.app.post("/.well-known/est/simpleenroll")
         async def simple_enrollment(
             request: Request,

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.serialization import pkcs7
 from cryptography.x509.oid import NameOID, ExtensionOID
 
 from .config import CAConfig
@@ -25,10 +26,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CertificateResult:
-    """Result of certificate generation."""
-    certificate: str  # PEM format
-    private_key: str  # PEM format
-    certificate_pkcs7: str  # PKCS#7 format
+    """Result of EST-compliant certificate enrollment."""
+    certificate_pkcs7: str  # PKCS#7 format (EST standard response)
+    serial_number: str
+    valid_until: datetime
 
 
 @dataclass
@@ -90,13 +91,8 @@ class CertificateAuthority:
             if not self._ca_cert:
                 raise ESTCertificateError("CA certificate not loaded")
 
-            # Create PKCS#7 structure with CA certificate
-            # For simplicity, we'll return the CA cert in PEM format
-            # In production, you'd create proper PKCS#7
-            ca_cert_pem = self._ca_cert.public_bytes(serialization.Encoding.PEM)
-            ca_cert_b64 = base64.b64encode(ca_cert_pem).decode()
-
-            return ca_cert_b64
+            # Create proper PKCS#7 response with CA certificate
+            return self._create_pkcs7_response([self._ca_cert])
 
         except Exception as e:
             logger.error(f"Failed to get CA certificates: {e}")
@@ -145,22 +141,70 @@ class CertificateAuthority:
                 encryption_algorithm=serialization.NoEncryption()
             ).decode()
 
-            # Create PKCS#7 format
-            cert_pkcs7 = base64.b64encode(
-                certificate.public_bytes(serialization.Encoding.PEM)
-            ).decode()
+            # Create proper PKCS#7 response
+            cert_pkcs7 = self._create_pkcs7_response([certificate])
 
             logger.info(f"Generated bootstrap certificate for device: {device_id}")
 
+            # This method is now deprecated - use bootstrap_enrollment instead
+            valid_until = datetime.utcnow() + timedelta(days=30)
             return CertificateResult(
-                certificate=cert_pem,
-                private_key=key_pem,
-                certificate_pkcs7=cert_pkcs7
+                certificate_pkcs7=cert_pkcs7,
+                serial_number=str(certificate.serial_number),
+                valid_until=valid_until
             )
 
         except Exception as e:
             logger.error(f"Failed to generate bootstrap certificate: {e}")
             raise ESTCertificateError(f"Failed to generate bootstrap certificate: {e}")
+
+    async def bootstrap_enrollment(self, csr_data: bytes, requester: str) -> CertificateResult:
+        """
+        Process bootstrap enrollment with CSR (EST-compliant).
+
+        Args:
+            csr_data: PKCS#10 Certificate Signing Request
+            requester: Authenticated requester identifier
+
+        Returns:
+            CertificateResult with PKCS#7 certificate only (no private key)
+        """
+        try:
+            # Parse CSR
+            if csr_data.startswith(b'-----BEGIN'):
+                # PEM format
+                csr = x509.load_pem_x509_csr(csr_data)
+            else:
+                # Assume DER format
+                csr = x509.load_der_x509_csr(csr_data)
+
+            # Validate CSR
+            if not csr.is_signature_valid:
+                raise ESTEnrollmentError("Invalid CSR signature")
+
+            # Create certificate from CSR
+            certificate = self._create_certificate(
+                subject=csr.subject,
+                public_key=csr.public_key(),
+                validity_days=30,  # Short-lived bootstrap certificate
+                is_bootstrap=True
+            )
+
+            # Create proper PKCS#7 response
+            cert_pkcs7 = self._create_pkcs7_response([certificate])
+            valid_until = datetime.utcnow() + timedelta(days=30)
+
+            logger.info(f"Bootstrap enrollment successful for requester: {requester}")
+
+            return CertificateResult(
+                certificate_pkcs7=cert_pkcs7,
+                serial_number=str(certificate.serial_number),
+                valid_until=valid_until
+            )
+
+        except Exception as e:
+            logger.error(f"Bootstrap enrollment failed: {e}")
+            raise ESTEnrollmentError(f"Bootstrap enrollment failed: {e}")
 
     async def enroll_certificate(self, csr_data: bytes, requester: str) -> EnrollmentResult:
         """
@@ -194,10 +238,8 @@ class CertificateAuthority:
                 is_bootstrap=False
             )
 
-            # Create PKCS#7 format
-            cert_pkcs7 = base64.b64encode(
-                certificate.public_bytes(serialization.Encoding.PEM)
-            ).decode()
+            # Create proper PKCS#7 response
+            cert_pkcs7 = self._create_pkcs7_response([certificate])
 
             valid_until = datetime.utcnow() + timedelta(days=self.config.cert_validity_days)
 
@@ -336,3 +378,35 @@ class CertificateAuthority:
         except Exception as e:
             logger.error(f"Certificate revocation failed: {e}")
             return False
+
+    def _create_pkcs7_response(self, certificates: list) -> str:
+        """
+        Create proper PKCS#7 response for EST protocol.
+
+        Args:
+            certificates: List of x509.Certificate objects
+
+        Returns:
+            Base64-encoded PKCS#7 certificate response
+        """
+        try:
+            if not certificates:
+                raise ESTCertificateError("No certificates provided for PKCS#7 response")
+
+            # Use the cryptography library's built-in function to create
+            # a certificates-only PKCS#7 structure (degenerate PKCS#7)
+            # This is exactly what EST RFC 7030 requires
+            pkcs7_der = pkcs7.serialize_certificates(
+                certificates,
+                serialization.Encoding.DER
+            )
+
+            # Base64 encode for EST transport as required by RFC 7030
+            pkcs7_b64 = base64.b64encode(pkcs7_der).decode()
+
+            logger.debug(f"Created proper PKCS#7 response with {len(certificates)} certificate(s)")
+            return pkcs7_b64
+
+        except Exception as e:
+            logger.error(f"Failed to create PKCS#7 response: {e}")
+            raise ESTCertificateError(f"Failed to create PKCS#7 response: {e}")

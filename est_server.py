@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-Test the updated EST server with new features
+Python EST Server - RFC 7030 Compliant Implementation
+
+EST (Enrollment over Secure Transport) server providing certificate
+enrollment services for IoT devices and enterprise environments.
 """
 
 import asyncio
@@ -14,7 +17,7 @@ from python_est.server import ESTServer
 from python_est.config import ESTConfig
 
 async def main():
-    """Test the EST server."""
+    """Start the EST server."""
     try:
         # Load configuration
         config = ESTConfig.from_file("config.yaml")
@@ -22,12 +25,15 @@ async def main():
         # Create and start server
         server = ESTServer(config)
 
-        print("Starting EST Server with new features...")
-        print("Server Stats: https://localhost:8445/")
-        print("Bootstrap UI: https://localhost:8445/.well-known/est/bootstrap")
-        print("Fixed credentials: estuser / estpass123")
-        print("Features: Bootstrap -> Auto-Enrollment -> Complete!")
+        print("Starting Python EST Server (RFC 7030 Compliant)")
+        print("=" * 50)
+        print("Dashboard:        https://localhost:8445/")
+        print("EST Bootstrap:    https://localhost:8445/.well-known/est/bootstrap")
+        print("EST CA Certs:     https://localhost:8445/.well-known/est/cacerts")
+        print("EST Enrollment:   https://localhost:8445/.well-known/est/simpleenroll")
         print("")
+        print("Default credentials: estuser / estpass123")
+        print("=" * 50)
         print("Press Ctrl+C to stop...")
 
         await server.start()
