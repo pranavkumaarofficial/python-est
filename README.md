@@ -51,7 +51,13 @@ poetry install
 ### Basic Usage
 
 ```bash
-# Start the EST server
+# 1. Generate certificates (first time only)
+python setup_certificates.py
+
+# 2. Verify setup
+python setup_check.py
+
+# 3. Start the EST server
 python test_server.py
 
 # Server will start on https://localhost:8445
@@ -66,6 +72,21 @@ python test_server.py
 1. Navigate to bootstrap page
 2. Enter credentials and device ID
 3. Automatic bootstrap → enrollment → certificate download
+
+### 🔐 Certificate Setup
+
+After cloning the repository, you **must** generate certificates:
+
+```bash
+# Generates CA, server, and client certificates
+python setup_certificates.py
+```
+
+This creates:
+- **Root CA**: `certs/ca-cert.pem` (10-year validity)
+- **Server TLS**: `certs/server.crt` (1-year validity)
+- **Sample Client**: `certs/client.crt` (for testing)
+- **Configuration**: `config.yaml` (from example)
 
 ### Docker Deployment
 
