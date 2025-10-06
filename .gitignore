@@ -190,6 +190,8 @@ finaltest.*
 mydevice.*
 device*.csr
 device*.key
+device_*/
+device-*/
 
 # Debug files
 debug-*.py

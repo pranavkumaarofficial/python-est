@@ -38,10 +38,11 @@ EST (RFC 7030) is a protocol that enables automated certificate enrollment and m
 - Secure key generation (RSA 2048/3072/4096-bit)
 
 ### 🖥️ **Management Interface**
-- Web-based dashboard for server monitoring
-- Interactive bootstrap interface for device enrollment
-- Certificate download and bundle creation
-- Real-time enrollment statistics
+- Web-based dashboard for server monitoring and device tracking
+- REST API for device management and statistics
+- Device deletion endpoint for re-enrollment
+- Real-time enrollment statistics with human-readable device IDs
+- Duplicate device prevention with HTTP 409 Conflict
 
 ## 🚀 Quick Start
 
@@ -77,19 +78,39 @@ The server will start on `https://localhost:8445` with these endpoints:
 
 Default credentials: `estuser` / `estpass123`
 
-### 3. Enroll a Device
+### 3. Enroll Devices
 
 ```bash
 # Complete EST enrollment flow
-python est_client.py https://localhost:8445 my-device estuser estpass123
+python est_client.py https://localhost:8445 my-device-001 estuser estpass123
+
+# Enroll multiple devices
+python est_client.py https://localhost:8445 warehouse-scanner-01 estuser estpass123
+python est_client.py https://localhost:8445 iot-sensor-42 estuser estpass123
 ```
 
 This creates a device directory with:
-- Private key (`.key`)
+- Private key (`.key`) - **Generated on client side only**
 - Certificate Signing Request (`.csr`)
 - CA certificates (`.p7b`)
-- Device certificate (`.pem`)
+- Bootstrap certificate (`.pem`)
+- Enrolled certificate (`.pem`)
 - Certificate bundle (`.tar.gz`)
+
+### 4. Manage Devices
+
+```bash
+# List all devices
+curl -k https://localhost:8445/api/devices
+
+# Delete a device (for re-enrollment)
+curl -k -X DELETE https://localhost:8445/api/devices/my-device-001
+
+# Re-enroll after deletion
+python est_client.py https://localhost:8445 my-device-001 estuser estpass123
+```
+
+**Note**: Duplicate device IDs are rejected with HTTP 409 Conflict. Delete the device first to re-enroll.
 
 ## 📚 EST Protocol Implementation
 
@@ -98,9 +119,18 @@ This creates a device directory with:
 | Endpoint | Method | Purpose | Authentication |
 |----------|--------|---------|----------------|
 | `/cacerts` | GET | Retrieve CA certificates | None |
-| `/bootstrap` | POST | Initial device enrollment | HTTP Basic |
+| `/bootstrap` | POST | Initial device enrollment (CSR required) | HTTP Basic |
 | `/simpleenroll` | POST | Certificate enrollment | HTTP Basic |
 | `/simplereenroll` | POST | Certificate renewal | Client Cert |
+
+### Management API Endpoints
+
+| Endpoint | Method | Purpose | Response |
+|----------|--------|---------|----------|
+| `/api/devices` | GET | List all enrolled devices | JSON |
+| `/api/devices/{id}` | DELETE | Remove device (allows re-enrollment) | JSON |
+| `/api/stats` | GET | Server statistics | JSON |
+| `/api/status` | GET | Server status | JSON |
 
 ### Certificate Flow
 

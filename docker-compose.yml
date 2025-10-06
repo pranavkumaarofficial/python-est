@@ -5,7 +5,7 @@ services:
     build: .
     container_name: python-est-server
     ports:
-      - "8443:8443"
+      - "8445:8445"
     volumes:
       - ./data:/app/data
       - ./certs:/app/certs
@@ -17,7 +17,7 @@ services:
       - EST_TEST_PASSWORD=SecureTestP@ss123
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-k", "-f", "https://localhost:8443/.well-known/est/cacerts"]
+      test: ["CMD", "curl", "-k", "-f", "https://localhost:8445/.well-known/est/cacerts"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -20,6 +20,11 @@ RUN pip install --no-cache-dir -e .
 # Copy source code
 COPY src/ ./src/
 COPY examples/ ./examples/
+COPY est_server.py ./
+COPY est_client.py ./
+COPY generate_certificates.py ./
+COPY validate_setup.py ./
+COPY config.example.yaml ./
 
 # Create directories with proper permissions
 RUN mkdir -p /app/data /app/certs /app/logs && \
@@ -33,11 +38,11 @@ RUN chmod +x /entrypoint.sh
 USER est
 
 # Expose EST port
-EXPOSE 8443
+EXPOSE 8445
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -k -f https://localhost:8443/.well-known/est/cacerts || exit 1
+    CMD curl -k -f https://localhost:8445/.well-known/est/cacerts || exit 1
 
 # Set entrypoint
 ENTRYPOINT ["/entrypoint.sh"]

@@ -98,65 +98,6 @@ class CertificateAuthority:
             logger.error(f"Failed to get CA certificates: {e}")
             raise ESTCertificateError(f"Failed to get CA certificates: {e}")
 
-    async def generate_bootstrap_certificate(self, device_id: str, username: str) -> CertificateResult:
-        """
-        Generate bootstrap certificate for device.
-
-        Args:
-            device_id: Device identifier
-            username: Authenticated username
-
-        Returns:
-            CertificateResult with certificate and private key
-        """
-        try:
-            # Generate private key for device
-            private_key = rsa.generate_private_key(
-                public_exponent=65537,
-                key_size=self.config.key_size
-            )
-
-            # Create certificate subject
-            subject = x509.Name([
-                x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),
-                x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Bootstrap"),
-                x509.NameAttribute(NameOID.LOCALITY_NAME, "EST"),
-                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "EST Bootstrap"),
-                x509.NameAttribute(NameOID.COMMON_NAME, device_id),
-            ])
-
-            # Create certificate
-            certificate = self._create_certificate(
-                subject=subject,
-                public_key=private_key.public_key(),
-                validity_days=30,  # Short-lived bootstrap certificate
-                is_bootstrap=True
-            )
-
-            # Convert to PEM format
-            cert_pem = certificate.public_bytes(serialization.Encoding.PEM).decode()
-            key_pem = private_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption()
-            ).decode()
-
-            # Create proper PKCS#7 response
-            cert_pkcs7 = self._create_pkcs7_response([certificate])
-
-            logger.info(f"Generated bootstrap certificate for device: {device_id}")
-
-            # This method is now deprecated - use bootstrap_enrollment instead
-            valid_until = datetime.utcnow() + timedelta(days=30)
-            return CertificateResult(
-                certificate_pkcs7=cert_pkcs7,
-                serial_number=str(certificate.serial_number),
-                valid_until=valid_until
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to generate bootstrap certificate: {e}")
-            raise ESTCertificateError(f"Failed to generate bootstrap certificate: {e}")
 
     async def bootstrap_enrollment(self, csr_data: bytes, requester: str) -> CertificateResult:
         """

@@ -16,6 +16,9 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, HTMLResponse
 
+from cryptography import x509
+from cryptography.x509.oid import NameOID
+
 from .config import ESTConfig
 from .auth import SRPAuthenticator
 from .ca import CertificateAuthority
@@ -134,26 +137,24 @@ class ESTServer:
             devices = self.device_tracker.get_recent_devices(24)
             return [device.dict() for device in devices]
 
-        @self.app.get("/download/certificate/{device_id}")
-        async def download_certificate(device_id: str):
-            """Download bootstrap certificate for a device."""
-            # This would be implemented with proper certificate storage
-            # For now, return a placeholder
-            return Response(
-                content=f"Certificate for {device_id}",
-                media_type="application/x-pem-file",
-                headers={"Content-Disposition": f"attachment; filename={device_id}_cert.pem"}
-            )
+        @self.app.delete("/api/devices/{device_id}")
+        async def delete_device(device_id: str):
+            """Delete a device from tracking."""
+            await self._ensure_initialized()
 
-        @self.app.get("/download/key/{device_id}")
-        async def download_private_key(device_id: str):
-            """Download private key for a device."""
-            # This would be implemented with proper key storage
-            return Response(
-                content=f"Private key for {device_id}",
-                media_type="application/x-pem-file",
-                headers={"Content-Disposition": f"attachment; filename={device_id}_key.pem"}
-            )
+            success = self.device_tracker.delete_device(device_id)
+
+            if success:
+                return {
+                    "success": True,
+                    "message": f"Device '{device_id}' deleted successfully",
+                    "device_id": device_id
+                }
+            else:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Device '{device_id}' not found"
+                )
 
         @self.app.get("/.well-known/est/cacerts")
         async def get_ca_certificates() -> Response:
@@ -177,100 +178,6 @@ class ESTServer:
             except Exception as e:
                 logger.error(f"Failed to retrieve CA certificates: {e}")
                 raise HTTPException(status_code=500, detail="Failed to retrieve CA certificates")
-
-        @self.app.get("/.well-known/est/bootstrap")
-        async def bootstrap_page() -> HTMLResponse:
-            """
-            Bootstrap authentication page
-
-            Provides HTML form for SRP-based bootstrap authentication.
-            """
-            if not self.config.bootstrap_enabled:
-                raise HTTPException(status_code=404, detail="Bootstrap not enabled")
-
-            # Ensure initialization
-            await self._ensure_initialized()
-
-            html_content = self._get_bootstrap_html()
-            return HTMLResponse(content=html_content)
-
-        @self.app.post("/.well-known/est/bootstrap/authenticate")
-        async def bootstrap_authenticate(request: Request) -> HTMLResponse:
-            """
-            Process bootstrap authentication and automatic enrollment
-
-            Handles SRP authentication for bootstrap enrollment, then performs automatic enrollment.
-            """
-            client_ip = request.client.host if request.client else "unknown"
-            user_agent = request.headers.get("user-agent")
-
-            try:
-                form_data = await request.form()
-                username = form_data.get("username", "").strip()
-                password = form_data.get("password", "").strip()
-                device_id = form_data.get("device_id", "").strip()
-
-                if not all([username, password, device_id]):
-                    self.device_tracker.track_request("bootstrap", success=False)
-                    raise HTTPException(status_code=400, detail="Missing required fields")
-
-                # Authenticate with SRP
-                auth_result = await self.srp_auth.authenticate(username, password)
-                if not auth_result.success:
-                    self.device_tracker.track_request("bootstrap", success=False)
-                    raise ESTAuthenticationError("Invalid credentials")
-
-                # Generate bootstrap certificate
-                cert_result = await self.ca.generate_bootstrap_certificate(
-                    device_id=device_id,
-                    username=username
-                )
-
-                # Track bootstrap with certificate data
-                self.device_tracker.track_bootstrap(
-                    device_id=device_id,
-                    username=username,
-                    ip_address=client_ip,
-                    user_agent=user_agent,
-                    bootstrap_cert_serial=str(cert_result.certificate.split('\n')[0]),  # Simplified serial extraction
-                    certificate=cert_result.certificate,
-                    private_key=cert_result.private_key
-                )
-
-                # Automatically perform enrollment after bootstrap
-                enrollment_result = await self._perform_automatic_enrollment(
-                    device_id=device_id,
-                    username=username,
-                    bootstrap_cert=cert_result.certificate,
-                    bootstrap_key=cert_result.private_key
-                )
-
-                # Track enrollment if successful
-                if enrollment_result.get("success"):
-                    self.device_tracker.track_enrollment(
-                        device_id=device_id,
-                        enrolled_cert_serial="auto-enrolled-" + device_id  # Simplified serial
-                    )
-
-                success_html = self._get_bootstrap_success_html(
-                    username=username,
-                    device_id=device_id,
-                    certificate=cert_result.certificate,
-                    private_key=cert_result.private_key,
-                    enrollment_result=enrollment_result
-                )
-
-                return HTMLResponse(content=success_html)
-
-            except ESTAuthenticationError:
-                self.device_tracker.track_request("bootstrap", success=False)
-                error_html = self._get_bootstrap_error_html("Authentication failed")
-                return HTMLResponse(content=error_html, status_code=401)
-            except Exception as e:
-                logger.error(f"Bootstrap authentication error: {e}")
-                self.device_tracker.track_request("bootstrap", success=False)
-                error_html = self._get_bootstrap_error_html("Internal server error")
-                return HTMLResponse(content=error_html, status_code=500)
 
         @self.app.post("/.well-known/est/bootstrap")
         async def est_bootstrap(
@@ -300,12 +207,28 @@ class ESTServer:
                 # Process bootstrap enrollment with CSR
                 result = await self.ca.bootstrap_enrollment(csr_data, credentials.username)
 
+                # Extract device ID from CSR Common Name
+                device_id = f"est-{credentials.username}-{result.serial_number}"  # fallback
+                try:
+                    if csr_data.startswith(b'-----BEGIN'):
+                        csr = x509.load_pem_x509_csr(csr_data)
+                    else:
+                        csr = x509.load_der_x509_csr(csr_data)
+
+                    # Get Common Name from CSR subject
+                    for attribute in csr.subject:
+                        if attribute.oid == NameOID.COMMON_NAME:
+                            device_id = attribute.value
+                            break
+                except Exception as e:
+                    logger.warning(f"Could not extract device ID from CSR, using fallback: {e}")
+
                 # Track the bootstrap
                 client_ip = request.client.host if request.client else "unknown"
                 user_agent = request.headers.get("user-agent")
 
                 self.device_tracker.track_bootstrap(
-                    device_id=f"est-{credentials.username}-{result.serial_number}",
+                    device_id=device_id,
                     username=credentials.username,
                     ip_address=client_ip,
                     user_agent=user_agent,
@@ -326,6 +249,10 @@ class ESTServer:
 
             except HTTPException:
                 raise
+            except ValueError as e:
+                # Duplicate device error
+                logger.warning(f"Duplicate device bootstrap attempt: {e}")
+                raise HTTPException(status_code=409, detail=str(e))
             except Exception as e:
                 logger.error(f"EST bootstrap enrollment failed: {e}")
                 raise HTTPException(status_code=500, detail="Bootstrap enrollment failed")
@@ -352,11 +279,38 @@ class ESTServer:
                 if not csr_data:
                     raise HTTPException(status_code=400, detail="No CSR provided")
 
+                # Extract device ID from CSR Common Name
+                device_id = None
+                try:
+                    if csr_data.startswith(b'-----BEGIN'):
+                        csr = x509.load_pem_x509_csr(csr_data)
+                    else:
+                        csr = x509.load_der_x509_csr(csr_data)
+
+                    # Get Common Name from CSR subject
+                    for attribute in csr.subject:
+                        if attribute.oid == NameOID.COMMON_NAME:
+                            device_id = attribute.value
+                            break
+                except Exception as e:
+                    logger.warning(f"Could not extract device ID from enrollment CSR: {e}")
+
                 # Process enrollment
                 enrollment_result = await self.ca.enroll_certificate(
                     csr_data=csr_data,
                     requester=auth_result.username
                 )
+
+                # Track enrollment if we have device_id
+                if device_id:
+                    try:
+                        self.device_tracker.track_enrollment(
+                            device_id=device_id,
+                            enrolled_cert_serial=enrollment_result.serial_number
+                        )
+                        logger.info(f"Tracked enrollment for device: {device_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to track enrollment: {e}")
 
                 return Response(
                     content=enrollment_result.certificate_pkcs7,
@@ -412,72 +366,6 @@ class ESTServer:
             await self.srp_auth.ensure_default_user()
             self._initialized = True
 
-    async def _perform_automatic_enrollment(self, device_id: str, username: str,
-                                          bootstrap_cert: str, bootstrap_key: str) -> Dict[str, str]:
-        """
-        Automatically perform enrollment after bootstrap.
-
-        Args:
-            device_id: Device identifier
-            username: Authenticated username
-            bootstrap_cert: Bootstrap certificate
-            bootstrap_key: Bootstrap private key
-
-        Returns:
-            Enrollment result dictionary
-        """
-        try:
-            # Generate a CSR for the device
-            from cryptography import x509
-            from cryptography.x509.oid import NameOID
-            from cryptography.hazmat.primitives import hashes, serialization
-            from cryptography.hazmat.primitives.asymmetric import rsa
-
-            # Generate new key pair for enrollment
-            private_key = rsa.generate_private_key(
-                public_exponent=65537,
-                key_size=2048,
-            )
-
-            # Create CSR
-            subject = x509.Name([
-                x509.NameAttribute(NameOID.COMMON_NAME, device_id),
-                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "EST Enrolled Device"),
-            ])
-
-            csr = x509.CertificateSigningRequestBuilder().subject_name(subject).sign(
-                private_key, hashes.SHA256()
-            )
-
-            csr_pem = csr.public_bytes(serialization.Encoding.PEM)
-
-            # Process enrollment using the existing CA
-            enrollment_result = await self.ca.enroll_certificate(
-                csr_data=csr_pem,
-                requester=username
-            )
-
-            # Get the private key for the enrolled certificate
-            enrolled_key_pem = private_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption()
-            )
-
-            return {
-                "success": True,
-                "certificate": enrollment_result.certificate_pkcs7.decode() if hasattr(enrollment_result.certificate_pkcs7, 'decode') else str(enrollment_result.certificate_pkcs7),
-                "private_key": enrolled_key_pem.decode(),
-                "message": "Automatic enrollment completed successfully"
-            }
-
-        except Exception as e:
-            logger.error(f"Automatic enrollment failed: {e}")
-            return {
-                "success": False,
-                "message": f"Automatic enrollment failed: {str(e)}"
-            }
-
     def _get_comprehensive_stats_html(self, stats) -> str:
         """Generate minimalistic server statistics dashboard."""
 
@@ -486,10 +374,7 @@ class ESTServer:
         for device in stats.recent_devices:
             status_color = "#007acc" if device.status == "enrolled" else "#94a3b8"
             status_text = "Enrolled" if device.status == "enrolled" else "Bootstrap"
-            download_buttons = f'''
-                <a href="/download/certificate/{device.device_id}" class="download-btn">Cert</a>
-                <a href="/download/key/{device.device_id}" class="download-btn">Key</a>
-            ''' if device.status == "enrolled" else "—"
+            download_buttons = "—"  # Removed insecure download endpoints
 
             device_rows += f'''
             <tr class="device-row">
@@ -953,8 +838,8 @@ class ESTServer:
                     <span>CA certificate distribution</span>
                 </div>
                 <div class="endpoint">
-                    <strong>GET /.well-known/est/bootstrap</strong>
-                    <span>Bootstrap authentication</span>
+                    <strong>POST /.well-known/est/bootstrap</strong>
+                    <span>Bootstrap enrollment (CSR required)</span>
                 </div>
                 <div class="endpoint">
                     <strong>POST /.well-known/est/simpleenroll</strong>
@@ -979,7 +864,6 @@ class ESTServer:
                 <div class="data-block">
                     <h3>Quick Actions</h3>
                     <div style="display: flex; flex-direction: column; gap: 8px;">
-                        <a href="/.well-known/est/bootstrap" class="api-link">Bootstrap Device</a>
                         <a href="/api/stats" class="api-link">View JSON Stats</a>
                         <a href="/api/devices" class="api-link">Export Device List</a>
                     </div>
@@ -990,646 +874,6 @@ class ESTServer:
         <div class="credentials">
             <strong>Bootstrap Credentials:</strong> estuser / estpass123
         </div>
-    </div>
-</body>
-</html>'''
-
-    def _get_bootstrap_html(self) -> str:
-        """Generate minimalistic bootstrap authentication HTML page."""
-        return '''<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EST Bootstrap</title>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-    <style>
-        * {
-            margin: 0; padding: 0; box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: #fafbfc;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-            font-size: 14px;
-            line-height: 1.6;
-        }
-
-        .container {
-            background: white;
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 40px;
-            width: 100%;
-            max-width: 420px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-            animation: slideUp 0.5s ease-out;
-        }
-
-        @keyframes slideUp {
-            from { opacity: 0; transform: translateY(30px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .header {
-            text-align: center;
-            margin-bottom: 32px;
-        }
-
-        .header h1 {
-            font-size: 24px;
-            font-weight: 600;
-            color: #111827;
-            margin-bottom: 6px;
-            letter-spacing: -0.025em;
-        }
-
-        .header p {
-            color: #6b7280;
-            font-size: 15px;
-            font-weight: 400;
-        }
-
-        .credentials {
-            background: #f0f9ff;
-            border: 1px solid #bae6fd;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 24px;
-            text-align: center;
-        }
-
-        .credentials h3 {
-            font-size: 14px;
-            font-weight: 600;
-            color: #0369a1;
-            margin-bottom: 12px;
-            text-transform: uppercase;
-            letter-spacing: 0.025em;
-        }
-
-        .credential-item {
-            background: white;
-            border: 1px solid #e0f2fe;
-            border-radius: 6px;
-            padding: 8px 12px;
-            margin: 6px 0;
-            font-family: 'SF Mono', Monaco, monospace;
-            font-size: 13px;
-            font-weight: 500;
-            color: #374151;
-        }
-
-        .auto-fill {
-            margin-top: 12px;
-            font-size: 12px;
-            color: #007acc;
-            cursor: pointer;
-            text-decoration: none;
-            font-weight: 500;
-            transition: color 0.2s ease;
-        }
-
-        .auto-fill:hover {
-            color: #005fa3;
-            text-decoration: underline;
-        }
-
-        .form-group {
-            margin-bottom: 20px;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 6px;
-            font-weight: 500;
-            color: #374151;
-            font-size: 13px;
-        }
-
-        .form-group input {
-            width: 100%;
-            padding: 12px 16px;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            font-size: 14px;
-            font-family: 'DM Sans', sans-serif;
-            transition: all 0.2s ease;
-            background: #fafbfc;
-        }
-
-        .form-group input:focus {
-            outline: none;
-            border-color: #007acc;
-            box-shadow: 0 0 0 3px rgba(0, 122, 204, 0.1);
-            background: white;
-        }
-
-        .form-group input::placeholder {
-            color: #9ca3af;
-        }
-
-        .submit-btn {
-            width: 100%;
-            padding: 14px 20px;
-            background: #007acc;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            font-family: 'DM Sans', sans-serif;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            margin-bottom: 20px;
-        }
-
-        .submit-btn:hover {
-            background: #005fa3;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(0, 122, 204, 0.2);
-        }
-
-        .submit-btn:active {
-            transform: translateY(0);
-        }
-
-        .process-info {
-            background: #f9fafb;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            padding: 16px;
-            text-align: center;
-        }
-
-        .process-info h4 {
-            font-size: 13px;
-            font-weight: 600;
-            color: #374151;
-            margin-bottom: 8px;
-            text-transform: uppercase;
-            letter-spacing: 0.025em;
-        }
-
-        .process-steps {
-            font-size: 12px;
-            color: #6b7280;
-            line-height: 1.5;
-        }
-
-        .back-link {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            color: #6b7280;
-            text-decoration: none;
-            font-size: 13px;
-            font-weight: 500;
-            transition: color 0.2s ease;
-        }
-
-        .back-link:hover {
-            color: #374151;
-        }
-
-        @media (max-width: 480px) {
-            .container {
-                padding: 32px 24px;
-                margin: 16px;
-            }
-
-            .back-link {
-                position: static;
-                display: block;
-                text-align: center;
-                margin-bottom: 20px;
-            }
-        }
-    </style>
-    <script>
-        function fillCredentials() {
-            document.getElementById('username').value = 'estuser';
-            document.getElementById('password').value = 'estpass123';
-            document.getElementById('device_id').focus();
-        }
-    </script>
-</head>
-<body>
-    <a href="/" class="back-link">← Dashboard</a>
-
-    <div class="container">
-        <div class="header">
-            <h1>EST Bootstrap</h1>
-            <p>Certificate enrollment</p>
-        </div>
-
-        <div class="credentials">
-            <h3>Credentials</h3>
-            <div class="credential-item">estuser</div>
-            <div class="credential-item">estpass123</div>
-            <a href="#" class="auto-fill" onclick="fillCredentials()">Auto-fill form</a>
-        </div>
-
-        <form method="post" action="/.well-known/est/bootstrap/authenticate">
-            <div class="form-group">
-                <label for="username">Username</label>
-                <input type="text" id="username" name="username" required>
-            </div>
-
-            <div class="form-group">
-                <label for="password">Password</label>
-                <input type="password" id="password" name="password" required>
-            </div>
-
-            <div class="form-group">
-                <label for="device_id">Device ID</label>
-                <input type="text" id="device_id" name="device_id" placeholder="device-001" required>
-            </div>
-
-            <button type="submit" class="submit-btn">Bootstrap & Enroll</button>
-        </form>
-
-        <div class="process-info">
-            <h4>Process</h4>
-            <div class="process-steps">
-                Authenticate → Bootstrap certificate → Auto-enrollment → Complete
-            </div>
-        </div>
-    </div>
-</body>
-</html>'''
-
-    def _get_bootstrap_success_html(self, username: str, device_id: str, certificate: str, private_key: str, enrollment_result: Dict[str, str] = None) -> str:
-        """Generate minimalistic bootstrap success HTML page."""
-        enrollment_status = ""
-        if enrollment_result and enrollment_result.get("success"):
-            enrollment_status = f'''
-        <div class="status-item success">
-            <h3>Enrollment Status</h3>
-            <p>Completed successfully</p>
-        </div>
-        '''
-        elif enrollment_result:
-            enrollment_status = f'''
-        <div class="status-item error">
-            <h3>Enrollment Status</h3>
-            <p>Failed: {enrollment_result.get("message", "Unknown error")}</p>
-        </div>
-        '''
-
-        return f'''<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bootstrap Complete</title>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-    <style>
-        * {{
-            margin: 0; padding: 0; box-sizing: border-box;
-        }}
-
-        body {{
-            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: #fafbfc;
-            min-height: 100vh;
-            padding: 32px;
-            font-size: 14px;
-            line-height: 1.6;
-        }}
-
-        .container {{
-            max-width: 800px;
-            margin: 0 auto;
-            background: white;
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 40px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-            animation: slideUp 0.6s ease-out;
-        }}
-
-        @keyframes slideUp {{
-            from {{ opacity: 0; transform: translateY(30px); }}
-            to {{ opacity: 1; transform: translateY(0); }}
-        }}
-
-        .header {{
-            text-align: center;
-            margin-bottom: 40px;
-            padding-bottom: 24px;
-            border-bottom: 1px solid #e5e7eb;
-        }}
-
-        .header h1 {{
-            font-size: 28px;
-            font-weight: 600;
-            color: #111827;
-            margin-bottom: 8px;
-            letter-spacing: -0.025em;
-        }}
-
-        .header p {{
-            color: #6b7280;
-            font-size: 16px;
-        }}
-
-        .process-status {{
-            background: #f0f9ff;
-            border: 1px solid #bae6fd;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 32px;
-            text-align: center;
-        }}
-
-        .process-status h2 {{
-            font-size: 18px;
-            font-weight: 600;
-            color: #0369a1;
-            margin-bottom: 8px;
-        }}
-
-        .process-status p {{
-            color: #075985;
-            font-size: 14px;
-        }}
-
-        .details-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
-            margin-bottom: 32px;
-        }}
-
-        .detail-item {{
-            background: #f9fafb;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            padding: 16px;
-        }}
-
-        .detail-item h3 {{
-            font-size: 13px;
-            font-weight: 600;
-            color: #374151;
-            margin-bottom: 4px;
-            text-transform: uppercase;
-            letter-spacing: 0.025em;
-        }}
-
-        .detail-item p {{
-            color: #6b7280;
-            font-weight: 500;
-        }}
-
-        .status-item.success {{
-            background: #ecfdf5;
-            border-color: #10b981;
-        }}
-
-        .status-item.success h3 {{
-            color: #047857;
-        }}
-
-        .status-item.success p {{
-            color: #059669;
-        }}
-
-        .status-item.error {{
-            background: #fef2f2;
-            border-color: #ef4444;
-        }}
-
-        .status-item.error h3 {{
-            color: #dc2626;
-        }}
-
-        .status-item.error p {{
-            color: #ef4444;
-        }}
-
-        .certificates {{
-            margin-bottom: 32px;
-        }}
-
-        .certificates h2 {{
-            font-size: 18px;
-            font-weight: 600;
-            color: #111827;
-            margin-bottom: 16px;
-            text-align: center;
-        }}
-
-        .cert-grid {{
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-        }}
-
-        .cert-item {{
-            background: #f9fafb;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            padding: 20px;
-        }}
-
-        .cert-item h3 {{
-            font-size: 14px;
-            font-weight: 600;
-            color: #374151;
-            margin-bottom: 12px;
-        }}
-
-        .cert-content {{
-            background: white;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            padding: 12px;
-            font-family: 'SF Mono', Monaco, monospace;
-            font-size: 11px;
-            color: #4b5563;
-            word-break: break-all;
-            max-height: 100px;
-            overflow: hidden;
-        }}
-
-        .next-steps {{
-            background: #f0f9ff;
-            border: 1px solid #bae6fd;
-            border-radius: 8px;
-            padding: 24px;
-            text-align: center;
-        }}
-
-        .next-steps h2 {{
-            font-size: 16px;
-            font-weight: 600;
-            color: #0369a1;
-            margin-bottom: 16px;
-        }}
-
-        .steps-list {{
-            text-align: left;
-            display: inline-block;
-            color: #075985;
-            font-size: 13px;
-            line-height: 1.6;
-        }}
-
-        .steps-list li {{
-            margin-bottom: 6px;
-        }}
-
-        .back-link {{
-            position: absolute;
-            top: 32px;
-            left: 32px;
-            color: #6b7280;
-            text-decoration: none;
-            font-size: 13px;
-            font-weight: 500;
-            transition: color 0.2s ease;
-        }}
-
-        .back-link:hover {{
-            color: #374151;
-        }}
-
-        .download-link {{
-            display: inline-block;
-            padding: 8px 16px;
-            background: #007acc;
-            color: white;
-            text-decoration: none;
-            border-radius: 6px;
-            font-size: 13px;
-            font-weight: 500;
-            transition: all 0.2s ease;
-        }}
-
-        .download-link:hover {{
-            background: #005fa3;
-            transform: translateY(-1px);
-        }}
-
-        @media (max-width: 768px) {{
-            .cert-grid {{
-                grid-template-columns: 1fr;
-            }}
-
-            .container {{
-                padding: 32px 24px;
-                margin: 16px;
-            }}
-
-            .back-link {{
-                position: static;
-                display: block;
-                text-align: center;
-                margin-bottom: 20px;
-            }}
-        }}
-    </style>
-</head>
-<body>
-    <a href="/" class="back-link">← Dashboard</a>
-
-    <div class="container">
-        <div class="header">
-            <h1>Bootstrap Complete</h1>
-            <p>Certificate enrollment successful</p>
-        </div>
-
-        <div class="process-status">
-            <h2>Process Completed</h2>
-            <p>Authentication → Bootstrap → Auto-enrollment → Ready</p>
-        </div>
-
-        <div class="details-grid">
-            <div class="detail-item">
-                <h3>User</h3>
-                <p>{username}</p>
-            </div>
-            <div class="detail-item">
-                <h3>Device ID</h3>
-                <p>{device_id}</p>
-            </div>
-            <div class="detail-item">
-                <h3>Validity</h3>
-                <p>365 days</p>
-            </div>
-            {enrollment_status}
-        </div>
-
-        <div class="certificates">
-            <h2>Generated Certificates</h2>
-            <div class="cert-grid">
-                <div class="cert-item">
-                    <h3>Bootstrap Certificate</h3>
-                    <div class="cert-content">{certificate[:150]}...</div>
-                    <div style="text-align: center; margin-top: 12px;">
-                        <a href="/download/certificate/{device_id}" class="download-link">Download Certificate</a>
-                    </div>
-                </div>
-                <div class="cert-item">
-                    <h3>Bootstrap Private Key</h3>
-                    <div class="cert-content">{private_key[:150]}...</div>
-                    <div style="text-align: center; margin-top: 12px;">
-                        <a href="/download/key/{device_id}" class="download-link">Download Private Key</a>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="next-steps">
-            <h2>Next Steps</h2>
-            <ol class="steps-list">
-                <li>Save certificates and keys securely</li>
-                <li>Install in your application or device</li>
-                <li>Use for EST protocol operations</li>
-                <li>Monitor from the dashboard</li>
-            </ol>
-        </div>
-    </div>
-</body>
-</html>'''
-
-    def _get_bootstrap_error_html(self, error_message: str) -> str:
-        """Generate bootstrap error HTML page."""
-        return f'''<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bootstrap Error</title>
-    <style>
-        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-               background: linear-gradient(135deg, #e74c3c 0%, #f39c12 100%);
-               margin: 0; padding: 20px; min-height: 100vh; display: flex;
-               align-items: center; justify-content: center; }}
-        .container {{ background: white; padding: 40px; border-radius: 12px;
-                    box-shadow: 0 10px 30px rgba(0,0,0,0.2); max-width: 400px; width: 100%;
-                    text-align: center; }}
-        .error {{ color: #e74c3c; margin-bottom: 20px; }}
-        .error h1 {{ margin: 0; font-size: 28px; }}
-        .retry-btn {{ display: inline-block; padding: 12px 24px;
-                     background: #3498db; color: white; text-decoration: none;
-                     border-radius: 6px; margin-top: 20px; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="error">
-            <h1>❌ Bootstrap Failed</h1>
-            <p>{error_message}</p>
-        </div>
-        <a href="/.well-known/est/bootstrap" class="retry-btn">🔄 Try Again</a>
     </div>
 </body>
 </html>'''

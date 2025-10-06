@@ -106,11 +106,14 @@ class DeviceTracker:
 
     def track_bootstrap(self, device_id: str, username: str, ip_address: str,
                        user_agent: Optional[str] = None,
-                       bootstrap_cert_serial: Optional[str] = None,
-                       certificate: Optional[str] = None,
-                       private_key: Optional[str] = None) -> None:
-        """Track a bootstrap event."""
+                       bootstrap_cert_serial: Optional[str] = None) -> None:
+        """Track a bootstrap event. Raises ValueError if device already exists."""
         with self._lock:
+            # Check for duplicate device ID
+            if device_id in self._devices:
+                logger.warning(f"Duplicate bootstrap attempt for device: {device_id}")
+                raise ValueError(f"Device '{device_id}' is already registered. Delete the device first to re-enroll.")
+
             device = DeviceInfo(
                 device_id=device_id,
                 username=username,
@@ -126,53 +129,8 @@ class DeviceTracker:
             self._stats["bootstrap_certificates"] += 1
             self._stats["certificates_issued"] += 1
 
-            # Store certificates for download
-            if certificate and private_key:
-                self._store_certificates(device_id, certificate, private_key)
-
             self._save_data()
             logger.info(f"Tracked bootstrap for device: {device_id}")
-
-    def _store_certificates(self, device_id: str, certificate: str, private_key: str) -> None:
-        """Store certificates for download."""
-        try:
-            cert_dir = self.data_dir / "certificates"
-            cert_dir.mkdir(exist_ok=True)
-
-            # Store certificate
-            cert_file = cert_dir / f"{device_id}_cert.pem"
-            with open(cert_file, 'w') as f:
-                f.write(certificate)
-
-            # Store private key
-            key_file = cert_dir / f"{device_id}_key.pem"
-            with open(key_file, 'w') as f:
-                f.write(private_key)
-
-        except Exception as e:
-            logger.error(f"Failed to store certificates for {device_id}: {e}")
-
-    def get_certificate(self, device_id: str) -> Optional[str]:
-        """Get stored certificate for device."""
-        try:
-            cert_file = self.data_dir / "certificates" / f"{device_id}_cert.pem"
-            if cert_file.exists():
-                with open(cert_file, 'r') as f:
-                    return f.read()
-        except Exception as e:
-            logger.error(f"Failed to read certificate for {device_id}: {e}")
-        return None
-
-    def get_private_key(self, device_id: str) -> Optional[str]:
-        """Get stored private key for device."""
-        try:
-            key_file = self.data_dir / "certificates" / f"{device_id}_key.pem"
-            if key_file.exists():
-                with open(key_file, 'r') as f:
-                    return f.read()
-        except Exception as e:
-            logger.error(f"Failed to read private key for {device_id}: {e}")
-        return None
 
     def track_enrollment(self, device_id: str, enrolled_cert_serial: str) -> None:
         """Track an enrollment event for an existing device."""
@@ -248,6 +206,26 @@ class DeviceTracker:
             device for device in self._devices.values()
             if device.ip_address == ip_address
         ]
+
+    def delete_device(self, device_id: str) -> bool:
+        """
+        Delete a device from tracking.
+
+        Args:
+            device_id: Device identifier to delete
+
+        Returns:
+            True if device was deleted, False if not found
+        """
+        with self._lock:
+            if device_id not in self._devices:
+                logger.warning(f"Attempted to delete non-existent device: {device_id}")
+                return False
+
+            del self._devices[device_id]
+            self._save_data()
+            logger.info(f"Deleted device: {device_id}")
+            return True
 
     def cleanup_old_devices(self, days: int = 30) -> int:
         """Remove device records older than specified days."""
