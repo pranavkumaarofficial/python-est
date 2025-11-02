@@ -1,0 +1,124 @@
+# EST Server Configuration for IQE Gateway Compatibility
+#
+# This configuration enables raw DER PKCS#7 responses (no base64 encoding)
+# for compatibility with the IQE medical device gateway.
+#
+# IQE Gateway acts as an EST proxy for medical pumps:
+# Medical Pumps → IQE Gateway → EST Server
+#
+# The IQE gateway expects binary DER format responses instead of
+# base64-encoded responses (which is the RFC 7030 standard).
+
+server:
+  host: 0.0.0.0
+  port: 8445
+  workers: 1
+  reload: false
+  access_log: true
+  debug: false
+
+tls:
+  cert_file: certs/server.crt
+  key_file: certs/server.key
+  ca_file: certs/ca-cert.pem
+  min_version: TLSv1.2
+  max_version: TLSv1.3
+
+srp:
+  enabled: true
+  user_db: certs/srp_users.db
+  salt_length: 32
+  verifier_length: 256
+
+ca:
+  ca_cert: certs/ca-cert.pem
+  ca_key: certs/ca-key.pem
+  ca_key_password: null
+  cert_validity_days: 365  # 1 year validity for medical devices
+  key_size: 2048
+  digest_algorithm: sha256
+
+# EST Protocol Settings
+bootstrap_enabled: true
+bootstrap_path: /.well-known/est/bootstrap
+cacerts_path: /.well-known/est/cacerts
+simpleenroll_path: /.well-known/est/simpleenroll
+simplereenroll_path: /.well-known/est/simplereenroll
+
+# ⚠️ CRITICAL FOR IQE COMPATIBILITY ⚠️
+# Set to "der" for IQE gateway (raw binary DER format)
+# Set to "base64" for RFC 7030 compliance (standard EST clients)
+response_format: der
+
+# Security Settings
+max_cert_lifetime_days: 365
+require_client_cert: false
+rate_limit_enabled: true
+rate_limit_requests: 100
+rate_limit_window: 3600
+
+# IQE Integration Notes:
+#
+# 1. Response Format: Set to "der" (raw binary PKCS#7)
+#    - IQE expects binary DER, NOT base64-encoded
+#    - This is non-standard but required for IQE compatibility
+#
+# 2. TLS Trust:
+#    ⚠️ IMPORTANT: IQE team must import your CA certificate into their trust store
+#    - Provide them with: certs/ca-cert.pem
+#    - Without this, HTTPS connections will fail
+#
+# 3. Authentication:
+#    - IQE will use HTTP Basic Auth (username/password)
+#    - Create user credentials: python -m python_est.cli add-user <username>
+#
+# 4. Endpoints IQE will call:
+#    - GET  /.well-known/est/cacerts       (get CA certificate)
+#    - POST /.well-known/est/bootstrap     (initial enrollment for pumps)
+#    - POST /.well-known/est/simpleenroll  (enrollment with client cert)
+#
+# 5. Device Identification:
+#    - Each pump should have unique Common Name (CN) in CSR
+#    - Example: CN=pump-001, CN=pump-002, etc.
+#    - This CN will appear in the dashboard
+#
+# 6. Certificate Lifecycle:
+#    - Bootstrap: IQE requests cert on behalf of pump (username/password)
+#    - Enrollment: IQE can re-enroll using existing certificate
+#    - Renewal: Before expiry, IQE should re-enroll pumps
+#
+# 7. Monitoring:
+#    - Dashboard available at: https://localhost:8445/
+#    - View enrolled devices, statistics, and recent activity
+#
+# 8. Testing:
+#    a) Test cacerts endpoint:
+#       curl -k https://localhost:8445/.well-known/est/cacerts --output cacerts.p7b
+#       # Should receive binary DER PKCS#7 file
+#
+#    b) Test bootstrap (IQE will do this):
+#       # Generate test CSR
+#       openssl req -new -newkey rsa:2048 -nodes \
+#         -keyout pump-001-key.pem -out pump-001-csr.pem \
+#         -subj "/CN=pump-001/O=Hospital/C=US"
+#
+#       # POST to bootstrap endpoint
+#       curl -k -X POST https://localhost:8445/.well-known/est/bootstrap \
+#         -u estuser:estpass \
+#         -H "Content-Type: application/pkcs10" \
+#         --data-binary @pump-001-csr.pem \
+#         --output pump-001-cert.p7b
+#       # Should receive binary DER PKCS#7 file
+#
+# 9. Troubleshooting:
+#    - Check logs: EST server logs all requests
+#    - Verify response format: file pump-001-cert.p7b should show "data" (binary)
+#    - If IQE reports "invalid format", check response_format: der is set
+#    - If connection fails, verify IQE has ca-cert.pem in trust store
+#
+# 10. Production Deployment:
+#     - Use proper certificates (not self-signed)
+#     - Enable rate limiting
+#     - Set up monitoring and alerts
+#     - Regular backup of data/ directory
+#     - Rotate bootstrap credentials periodically

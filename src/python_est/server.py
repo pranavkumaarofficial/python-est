@@ -165,16 +165,29 @@ class ESTServer:
             No authentication required per RFC 7030.
             """
             try:
-                ca_certs_pkcs7 = await self.ca.get_ca_certificates_pkcs7()
+                # Check response format configuration
+                use_base64 = self.config.response_format == "base64"
+                ca_certs_pkcs7 = await self.ca.get_ca_certificates_pkcs7(encode_base64=use_base64)
 
-                return Response(
-                    content=ca_certs_pkcs7,
-                    media_type="application/pkcs7-mime",
-                    headers={
-                        "Content-Transfer-Encoding": "base64",
-                        "Content-Disposition": "attachment; filename=cacerts.p7c"
-                    }
-                )
+                if use_base64:
+                    # RFC 7030 compliant response with base64 encoding
+                    return Response(
+                        content=ca_certs_pkcs7,
+                        media_type="application/pkcs7-mime",
+                        headers={
+                            "Content-Transfer-Encoding": "base64",
+                            "Content-Disposition": "attachment; filename=cacerts.p7c"
+                        }
+                    )
+                else:
+                    # Raw DER response for IQE gateway compatibility
+                    return Response(
+                        content=ca_certs_pkcs7,
+                        media_type="application/pkcs7-mime",
+                        headers={
+                            "Content-Disposition": "attachment; filename=cacerts.p7c"
+                        }
+                    )
             except Exception as e:
                 logger.error(f"Failed to retrieve CA certificates: {e}")
                 raise HTTPException(status_code=500, detail="Failed to retrieve CA certificates")
@@ -205,7 +218,8 @@ class ESTServer:
                     raise HTTPException(status_code=401, detail="Authentication failed")
 
                 # Process bootstrap enrollment with CSR
-                result = await self.ca.bootstrap_enrollment(csr_data, credentials.username)
+                use_base64 = self.config.response_format == "base64"
+                result = await self.ca.bootstrap_enrollment(csr_data, credentials.username, encode_base64=use_base64)
 
                 # Extract device ID from CSR Common Name
                 device_id = f"est-{credentials.username}-{result.serial_number}"  # fallback
@@ -236,10 +250,17 @@ class ESTServer:
                 )
 
                 # Return PKCS#7 certificate with proper headers
-                headers = {
-                    "Content-Type": "application/pkcs7-mime",
-                    "Content-Transfer-Encoding": "base64"
-                }
+                if use_base64:
+                    # RFC 7030 compliant response
+                    headers = {
+                        "Content-Type": "application/pkcs7-mime",
+                        "Content-Transfer-Encoding": "base64"
+                    }
+                else:
+                    # Raw DER response for IQE gateway
+                    headers = {
+                        "Content-Type": "application/pkcs7-mime"
+                    }
 
                 return Response(
                     content=result.certificate_pkcs7,
@@ -296,9 +317,11 @@ class ESTServer:
                     logger.warning(f"Could not extract device ID from enrollment CSR: {e}")
 
                 # Process enrollment
+                use_base64 = self.config.response_format == "base64"
                 enrollment_result = await self.ca.enroll_certificate(
                     csr_data=csr_data,
-                    requester=auth_result.username
+                    requester=auth_result.username,
+                    encode_base64=use_base64
                 )
 
                 # Track enrollment if we have device_id
@@ -312,14 +335,25 @@ class ESTServer:
                     except Exception as e:
                         logger.warning(f"Failed to track enrollment: {e}")
 
-                return Response(
-                    content=enrollment_result.certificate_pkcs7,
-                    media_type="application/pkcs7-mime; smime-type=certs-only",
-                    headers={
-                        "Content-Transfer-Encoding": "base64",
-                        "Content-Disposition": "attachment; filename=cert.p7c"
-                    }
-                )
+                if use_base64:
+                    # RFC 7030 compliant response
+                    return Response(
+                        content=enrollment_result.certificate_pkcs7,
+                        media_type="application/pkcs7-mime; smime-type=certs-only",
+                        headers={
+                            "Content-Transfer-Encoding": "base64",
+                            "Content-Disposition": "attachment; filename=cert.p7c"
+                        }
+                    )
+                else:
+                    # Raw DER response for IQE gateway
+                    return Response(
+                        content=enrollment_result.certificate_pkcs7,
+                        media_type="application/pkcs7-mime; smime-type=certs-only",
+                        headers={
+                            "Content-Disposition": "attachment; filename=cert.p7c"
+                        }
+                    )
 
             except ESTAuthenticationError:
                 raise HTTPException(status_code=401, detail="Authentication failed")

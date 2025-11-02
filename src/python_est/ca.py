@@ -80,32 +80,38 @@ class CertificateAuthority:
             logger.error(f"Failed to load CA credentials: {e}")
             raise ESTCertificateError(f"Failed to load CA credentials: {e}")
 
-    async def get_ca_certificates_pkcs7(self) -> str:
+    async def get_ca_certificates_pkcs7(self, encode_base64: bool = True) -> str:
         """
         Get CA certificates in PKCS#7 format.
 
+        Args:
+            encode_base64: If True, return base64-encoded (RFC 7030 compliant).
+                          If False, return raw DER bytes (for IQE gateway).
+
         Returns:
-            Base64-encoded PKCS#7 containing CA certificate(s)
+            Base64-encoded PKCS#7 containing CA certificate(s) or raw DER bytes
         """
         try:
             if not self._ca_cert:
                 raise ESTCertificateError("CA certificate not loaded")
 
             # Create proper PKCS#7 response with CA certificate
-            return self._create_pkcs7_response([self._ca_cert])
+            return self._create_pkcs7_response([self._ca_cert], encode_base64=encode_base64)
 
         except Exception as e:
             logger.error(f"Failed to get CA certificates: {e}")
             raise ESTCertificateError(f"Failed to get CA certificates: {e}")
 
 
-    async def bootstrap_enrollment(self, csr_data: bytes, requester: str) -> CertificateResult:
+    async def bootstrap_enrollment(self, csr_data: bytes, requester: str, encode_base64: bool = True) -> CertificateResult:
         """
         Process bootstrap enrollment with CSR (EST-compliant).
 
         Args:
             csr_data: PKCS#10 Certificate Signing Request
             requester: Authenticated requester identifier
+            encode_base64: If True, return base64-encoded (RFC 7030 compliant).
+                          If False, return raw DER bytes (for IQE gateway).
 
         Returns:
             CertificateResult with PKCS#7 certificate only (no private key)
@@ -132,7 +138,7 @@ class CertificateAuthority:
             )
 
             # Create proper PKCS#7 response
-            cert_pkcs7 = self._create_pkcs7_response([certificate])
+            cert_pkcs7 = self._create_pkcs7_response([certificate], encode_base64=encode_base64)
             valid_until = datetime.utcnow() + timedelta(days=30)
 
             logger.info(f"Bootstrap enrollment successful for requester: {requester}")
@@ -147,13 +153,15 @@ class CertificateAuthority:
             logger.error(f"Bootstrap enrollment failed: {e}")
             raise ESTEnrollmentError(f"Bootstrap enrollment failed: {e}")
 
-    async def enroll_certificate(self, csr_data: bytes, requester: str) -> EnrollmentResult:
+    async def enroll_certificate(self, csr_data: bytes, requester: str, encode_base64: bool = True) -> EnrollmentResult:
         """
         Process certificate enrollment request.
 
         Args:
             csr_data: PKCS#10 Certificate Signing Request
             requester: Username of requester
+            encode_base64: If True, return base64-encoded (RFC 7030 compliant).
+                          If False, return raw DER bytes (for IQE gateway).
 
         Returns:
             EnrollmentResult with signed certificate
@@ -180,7 +188,7 @@ class CertificateAuthority:
             )
 
             # Create proper PKCS#7 response
-            cert_pkcs7 = self._create_pkcs7_response([certificate])
+            cert_pkcs7 = self._create_pkcs7_response([certificate], encode_base64=encode_base64)
 
             valid_until = datetime.utcnow() + timedelta(days=self.config.cert_validity_days)
 
@@ -320,15 +328,17 @@ class CertificateAuthority:
             logger.error(f"Certificate revocation failed: {e}")
             return False
 
-    def _create_pkcs7_response(self, certificates: list) -> str:
+    def _create_pkcs7_response(self, certificates: list, encode_base64: bool = True) -> str:
         """
         Create proper PKCS#7 response for EST protocol.
 
         Args:
             certificates: List of x509.Certificate objects
+            encode_base64: If True, return base64-encoded (RFC 7030 compliant).
+                          If False, return raw DER bytes (for IQE gateway compatibility).
 
         Returns:
-            Base64-encoded PKCS#7 certificate response
+            Base64-encoded PKCS#7 certificate response or raw DER bytes
         """
         try:
             if not certificates:
@@ -342,11 +352,15 @@ class CertificateAuthority:
                 serialization.Encoding.DER
             )
 
-            # Base64 encode for EST transport as required by RFC 7030
-            pkcs7_b64 = base64.b64encode(pkcs7_der).decode()
-
-            logger.debug(f"Created proper PKCS#7 response with {len(certificates)} certificate(s)")
-            return pkcs7_b64
+            if encode_base64:
+                # Base64 encode for EST transport as required by RFC 7030
+                pkcs7_b64 = base64.b64encode(pkcs7_der).decode()
+                logger.debug(f"Created base64-encoded PKCS#7 response with {len(certificates)} certificate(s)")
+                return pkcs7_b64
+            else:
+                # Return raw DER bytes for IQE gateway compatibility
+                logger.debug(f"Created raw DER PKCS#7 response with {len(certificates)} certificate(s)")
+                return pkcs7_der
 
         except Exception as e:
             logger.error(f"Failed to create PKCS#7 response: {e}")

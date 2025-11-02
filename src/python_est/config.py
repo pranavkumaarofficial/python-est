@@ -84,6 +84,12 @@ class ESTConfig(BaseModel):
     simpleenroll_path: str = Field("/.well-known/est/simpleenroll", description="Simple enrollment endpoint path")
     simplereenroll_path: str = Field("/.well-known/est/simplereenroll", description="Simple re-enrollment endpoint path")
 
+    # Response format configuration (for gateway compatibility)
+    response_format: str = Field(
+        "base64",
+        description="Response format: 'base64' (RFC 7030 compliant) or 'der' (raw binary for IQE gateway)"
+    )
+
     # Security settings
     max_cert_lifetime_days: int = Field(365, description="Maximum certificate lifetime")
     require_client_cert: bool = Field(False, description="Require client certificates for non-bootstrap endpoints")
