@@ -172,8 +172,9 @@ class ESTServer:
 
                 if use_base64:
                     # RFC 7030 compliant response with base64 encoding
+                    # Convert base64 string to bytes for HTTP response
                     return Response(
-                        content=ca_certs_pkcs7,
+                        content=ca_certs_pkcs7.encode('ascii') if isinstance(ca_certs_pkcs7, str) else ca_certs_pkcs7,
                         media_type="application/pkcs7-mime",
                         headers={
                             "Content-Transfer-Encoding": "base64",
@@ -275,7 +276,7 @@ class ESTServer:
                     }
 
                 return Response(
-                    content=result.certificate_pkcs7,
+                    content=result.certificate_pkcs7.encode('ascii') if isinstance(result.certificate_pkcs7, str) else result.certificate_pkcs7,
                     headers=headers,
                     status_code=200
                 )
@@ -361,8 +362,9 @@ class ESTServer:
 
                 if use_base64:
                     # RFC 7030 compliant response
+                    # Convert base64 string to bytes for HTTP response
                     return Response(
-                        content=enrollment_result.certificate_pkcs7,
+                        content=enrollment_result.certificate_pkcs7.encode('ascii') if isinstance(enrollment_result.certificate_pkcs7, str) else enrollment_result.certificate_pkcs7,
                         media_type="application/pkcs7-mime; smime-type=certs-only",
                         headers={
                             "Content-Transfer-Encoding": "base64",
