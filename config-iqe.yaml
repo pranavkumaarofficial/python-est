@@ -46,9 +46,10 @@ simpleenroll_path: /.well-known/est/simpleenroll
 simplereenroll_path: /.well-known/est/simplereenroll
 
 # ⚠️ CRITICAL FOR IQE COMPATIBILITY ⚠️
-# Set to "der" for IQE gateway (raw binary DER format)
-# Set to "base64" for RFC 7030 compliance (standard EST clients)
-response_format: der
+# IQE UI expects base64-encoded PKCS#7 responses (per their curl examples)
+# The UI then decodes: openssl base64 -in client.p7.b64 -out client.p7.der -d
+# Set to "base64" for IQE UI compatibility (RFC 7030 standard)
+response_format: base64
 
 # Security Settings
 max_cert_lifetime_days: 365
