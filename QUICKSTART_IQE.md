@@ -343,3 +343,72 @@ Once testing is complete:
 
 **Last Updated**: 2025-11-03
 **Status**: ✅ Ready for IQE integration testing
+
+
+
+
+
+✅ Everything is Ready! Here's What to Do:
+1. Git Commands to Push Code
+git checkout deploy_v1
+git add src/python_est/config.py src/python_est/ca.py src/python_est/server.py
+git add config-iqe.yaml generate_certificates_python.py create_iqe_user.py
+git add IQE_INTEGRATION.md IQE_CHANGES_SUMMARY.md QUICKSTART_IQE.md 
+git add SETUP_SUMMARY.md test_iqe_mode.py TEST_RESULTS.md
+
+git commit -m "feat: Add IQE gateway support with DER response format
+
+- Add response_format config (base64/der)
+- Support raw DER PKCS#7 for IQE gateway
+- Add Windows-compatible cert generator
+- Add user creation script
+- All tests passing, 100% backward compatible
+
+For: IQE medical device integration"
+
+git push origin deploy_v1
+2. Bootstrap Credentials (Already Created)
+Username: iqe-gateway
+Password: iqe-secure-password-2024
+Save these - you'll give them to IQE team.
+3. On Ubuntu VM (After Pulling)
+# Pull code
+git clone <your-repo>
+cd python-est
+git checkout deploy_v1
+
+# Install dependencies
+pip3 install -r requirements.txt
+pip3 install -e .
+
+# Generate certs
+python3 generate_certificates_python.py
+
+# Create user (already has password in script)
+python3 create_iqe_user.py
+
+# Start server
+python3 est_server.py --config config-iqe.yaml
+
+# OR with Docker:
+docker build -t python-est-iqe .
+docker run -d --name est-server-iqe -p 8445:8445 \
+  -v $(pwd)/certs:/app/certs:ro \
+  -v $(pwd)/data:/app/data \
+  python-est-iqe
+4. Test on Ubuntu
+curl -k https://localhost:8445/.well-known/est/cacerts --output test.p7b
+file test.p7b  # Should show "data" (binary)
+5. Give to IQE Team
+✅ CA Certificate: cat certs/ca-cert.pem
+✅ Server URL: https://<ubuntu-vm-ip>:8445
+✅ Credentials: iqe-gateway / iqe-secure-password-2024
+✅ Documentation: SETUP_SUMMARY.md or IQE_INTEGRATION.md
+📋 All Files Ready:
+✅ Code changes (tested and working)
+✅ Certificates generated
+✅ Bootstrap user created
+✅ Configuration ready
+✅ Documentation complete
+✅ Test suite passing
+You're all set to push to GitHub and deploy on Ubuntu! 🚀 Share updates as you go through the integration - I'm here if you need help!
