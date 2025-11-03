@@ -46,10 +46,10 @@ simpleenroll_path: /.well-known/est/simpleenroll
 simplereenroll_path: /.well-known/est/simplereenroll
 
 # ⚠️ CRITICAL FOR IQE COMPATIBILITY ⚠️
-# IQE UI expects base64-encoded PKCS#7 responses (per their curl examples)
-# The UI then decodes: openssl base64 -in client.p7.b64 -out client.p7.der -d
-# Set to "base64" for IQE UI compatibility (RFC 7030 standard)
-response_format: base64
+# IQE UI code has a BUG - it does NOT decode base64 despite Content-Transfer-Encoding header
+# It tries to parse base64 text directly as DER, which fails
+# Must use raw DER format (non-standard but required for buggy IQE implementation)
+response_format: der
 
 # Security Settings
 max_cert_lifetime_days: 365
