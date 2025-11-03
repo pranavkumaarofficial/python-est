@@ -1,0 +1,68 @@
+FROM ubuntu:20.04
+
+# Avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libssl-dev \
+    git \
+    autoconf \
+    automake \
+    libtool \
+    apache2-utils \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone and build libest
+WORKDIR /opt
+RUN git clone https://github.com/cisco/libest.git && \
+    cd libest && \
+    ./configure --prefix=/usr/local && \
+    make && \
+    make install
+
+# Set up example server
+WORKDIR /opt/libest/example/server
+
+# Generate CA certificates
+RUN ./mfgCAs.sh
+
+# Configure certificate with IP address
+RUN cat >> estExampleCA.cnf << 'EOF'
+
+[alt_names]
+DNS.1 = localhost
+DNS.2 = estserver
+IP.1 = 127.0.0.1
+IP.2 = 10.42.56.101
+EOF
+
+# Generate server certificates
+RUN ./mfgCerts.sh
+
+# Create user credentials (default: estuser:estpwd)
+RUN htdigest -c .htdigest estrealm estuser <<< $'estpwd\nestpwd'
+RUN htdigest .htdigest estrealm iqe-gateway <<< $'iqe-secure-password-2024\niqe-secure-password-2024'
+
+# Create startup script
+RUN cat > /opt/start-estserver.sh << 'EOF'
+#!/bin/bash
+cd /opt/libest/example/server
+exec ./estserver \
+  -c estCA/cacert.crt \
+  -k estCA/private/cakey.pem \
+  -r estrealm \
+  -p 8446 \
+  -o \
+  -v
+EOF
+
+RUN chmod +x /opt/start-estserver.sh
+
+# Expose EST port
+EXPOSE 8446
+
+# Start server
+CMD ["/opt/start-estserver.sh"]

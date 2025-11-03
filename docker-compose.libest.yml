@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  libest-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.libest
+    container_name: libest-est-server
+    ports:
+      - "8446:8446"
+    restart: unless-stopped
+    volumes:
+      - ./libest-certs:/opt/libest/example/server/estCA:ro
+    networks:
+      - est-network
+
+networks:
+  est-network:
+    driver: bridge
