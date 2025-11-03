@@ -5,6 +5,7 @@ Modern FastAPI-based EST protocol server with SRP authentication support.
 """
 
 import asyncio
+import base64
 import logging
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -201,13 +202,24 @@ class ESTServer:
             EST Bootstrap Enrollment (RFC 7030 Section 4.1)
 
             Accepts PKCS#10 CSR with HTTP Basic Auth and returns PKCS#7 certificate.
-            This is the proper EST protocol bootstrap endpoint.
+            Supports both raw DER/PEM and base64-encoded CSRs (for IQE compatibility).
             """
             try:
                 # Get CSR from request body
                 csr_data = await request.body()
                 if not csr_data:
                     raise HTTPException(status_code=400, detail="Missing CSR data")
+
+                # Check if CSR is base64-encoded (IQE UI compatibility)
+                content_transfer_encoding = request.headers.get("Content-Transfer-Encoding", "").lower()
+                if content_transfer_encoding == "base64":
+                    try:
+                        # Decode base64-encoded CSR
+                        csr_data = base64.b64decode(csr_data)
+                        logger.info(f"Decoded base64-encoded CSR ({len(csr_data)} bytes)")
+                    except Exception as e:
+                        logger.error(f"Failed to decode base64 CSR: {e}")
+                        raise HTTPException(status_code=400, detail="Invalid base64-encoded CSR")
 
                 # Authenticate using HTTP Basic Auth
                 auth_result = await self.srp_auth.authenticate(
@@ -288,6 +300,7 @@ class ESTServer:
 
             Accepts PKCS#10 CSR and returns PKCS#7 certificate.
             Requires authentication (SRP or client certificate).
+            Supports both raw DER/PEM and base64-encoded CSRs (for IQE compatibility).
             """
             try:
                 # Authenticate request
@@ -299,6 +312,17 @@ class ESTServer:
                 csr_data = await request.body()
                 if not csr_data:
                     raise HTTPException(status_code=400, detail="No CSR provided")
+
+                # Check if CSR is base64-encoded (IQE UI compatibility)
+                content_transfer_encoding = request.headers.get("Content-Transfer-Encoding", "").lower()
+                if content_transfer_encoding == "base64":
+                    try:
+                        # Decode base64-encoded CSR
+                        csr_data = base64.b64decode(csr_data)
+                        logger.info(f"Decoded base64-encoded CSR ({len(csr_data)} bytes)")
+                    except Exception as e:
+                        logger.error(f"Failed to decode base64 CSR: {e}")
+                        raise HTTPException(status_code=400, detail="Invalid base64-encoded CSR")
 
                 # Extract device ID from CSR Common Name
                 device_id = None
