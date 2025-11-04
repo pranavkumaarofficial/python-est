@@ -167,6 +167,14 @@ class ESTServer:
             html_content = self._get_comprehensive_stats_html(stats)
             return HTMLResponse(content=html_content)
 
+        @self.app.get("/health")
+        async def health() -> Dict[str, str]:
+            """Health check endpoint for Docker/Kubernetes."""
+            return {
+                "status": "healthy",
+                "service": "Python-EST Server"
+            }
+
         @self.app.get("/api/status")
         async def api_status() -> Dict[str, str]:
             """API status endpoint."""

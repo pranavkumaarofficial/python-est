@@ -25,7 +25,7 @@ services:
     volumes:
       - ./certs:/app/certs:ro          # Certificates (read-only)
       - ./data:/app/data                # Database (read-write)
-      - ./config-iqe.yaml:/app/config.yaml:ro  # Config (read-only)
+      - ./config-nginx.yaml:/app/config.yaml:ro  # Config for nginx mode (port 8000)
 
     # Environment variables
     environment:
@@ -39,7 +39,7 @@ services:
 
     # Health check
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -83,9 +83,9 @@ services:
     networks:
       - est_network
 
-    # Health check
+    # Health check (test backend connection)
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8445/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://python-est-server:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
