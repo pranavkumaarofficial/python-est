@@ -37,12 +37,19 @@ RUN chmod +x /entrypoint.sh
 # Switch to non-root user
 USER est
 
-# Expose EST port
-EXPOSE 8445
+# Expose EST ports
+# Port 8445 for standalone HTTPS mode
+# Port 8000 for nginx proxy mode (HTTP)
+EXPOSE 8445 8000
 
 # Health check
+# Check port 8000 (nginx mode) if NGINX_MODE is set, otherwise 8445 (standalone)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -k -f https://localhost:8445/.well-known/est/cacerts || exit 1
+    CMD if [ "$NGINX_MODE" = "true" ]; then \
+            curl -f http://localhost:8000/ || exit 1; \
+        else \
+            curl -k -f https://localhost:8445/.well-known/est/cacerts || exit 1; \
+        fi
 
 # Set entrypoint
 ENTRYPOINT ["/entrypoint.sh"]

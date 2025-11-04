@@ -1,0 +1,118 @@
+# Docker Compose configuration for EST Server with Nginx
+#
+# Architecture:
+#   IQE Gateway → Nginx (TLS termination) → Python EST Server (HTTP)
+#
+# Nginx extracts client certificates and forwards them via headers
+# This enables RA certificate authentication in containerized environments
+
+version: '3.8'
+
+services:
+  # Python EST Server (backend)
+  python-est-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: python-est-server
+    hostname: python-est-server
+
+    # Internal HTTP port (nginx forwards to this)
+    expose:
+      - "8000"
+
+    # Mount volumes
+    volumes:
+      - ./certs:/app/certs:ro          # Certificates (read-only)
+      - ./data:/app/data                # Database (read-write)
+      - ./config-iqe.yaml:/app/config.yaml:ro  # Config (read-only)
+
+    # Environment variables
+    environment:
+      - NGINX_MODE=true                 # Run in nginx mode (HTTP, not HTTPS)
+      - PORT=8000                       # Internal HTTP port
+      - PYTHONUNBUFFERED=1              # Disable Python output buffering
+
+    # Networking
+    networks:
+      - est_network
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Resource limits (adjust as needed)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # Nginx reverse proxy (frontend)
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: est-nginx
+    hostname: est-nginx
+
+    # Public HTTPS port
+    ports:
+      - "8445:8445"
+
+    # Mount nginx config and certificates
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+      - nginx_logs:/var/log/nginx
+
+    # Depends on Python EST server
+    depends_on:
+      python-est-server:
+        condition: service_healthy
+
+    # Networking
+    networks:
+      - est_network
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8445/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          cpus: '0.25'
+          memory: 64M
+
+# Networks
+networks:
+  est_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# Volumes
+volumes:
+  nginx_logs:
+    driver: local

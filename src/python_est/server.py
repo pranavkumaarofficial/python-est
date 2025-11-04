@@ -95,38 +95,61 @@ class ESTServer:
             allow_headers=["*"],
         )
 
-        # Middleware to extract client certificate from TLS connection
+        # Middleware to extract client certificate from nginx headers
         @self.app.middleware("http")
         async def extract_client_cert(request: Request, call_next):
-            """Extract client certificate from TLS connection and add to request state."""
-            logger.info(f"🔍 Middleware executing for: {request.method} {request.url.path}")
+            """
+            Extract client certificate from nginx TLS termination proxy.
 
-            # In production HTTPS with client certs, the certificate is available via scope
-            # uvicorn provides it in request.scope['transport']
-            client_cert_pem = None
+            Nginx extracts the client certificate from the TLS handshake and forwards
+            it via HTTP headers. This is the industry-standard approach for client
+            certificate authentication in containerized environments.
+            """
 
-            if hasattr(request, 'scope'):
-                logger.info(f"🔍 Request has scope attribute")
-                # Try to get SSL object from scope (uvicorn provides this)
-                transport = request.scope.get('transport')
-                logger.info(f"🔍 Transport: {transport}")
-                if transport and hasattr(transport, 'get_extra_info'):
-                    logger.info(f"🔍 Transport has get_extra_info")
-                    ssl_object = transport.get_extra_info('ssl_object')
-                    logger.info(f"🔍 SSL object: {ssl_object}")
-                    if ssl_object:
-                        try:
-                            # Get peer certificate in DER format
-                            cert_der = ssl_object.getpeercert(binary_form=True)
-                            if cert_der:
-                                # Convert to x509 certificate object
-                                from cryptography.hazmat.primitives import serialization
-                                cert = x509.load_der_x509_certificate(cert_der)
-                                # Store certificate in request state for authentication
-                                request.state.client_cert = cert
-                                logger.info(f"✅ Client certificate found: {cert.subject.rfc4514_string()}")
-                        except Exception as e:
-                            logger.debug(f"No client certificate in connection: {e}")
+            # Get client certificate verification status from nginx
+            ssl_verify = request.headers.get('X-SSL-Client-Verify', '')
+            ssl_subject_dn = request.headers.get('X-SSL-Client-S-DN', '')
+            ssl_cert_pem = request.headers.get('X-SSL-Client-Cert', '')
+
+            if ssl_cert_pem and ssl_verify == 'SUCCESS':
+                try:
+                    # Nginx URL-encodes the certificate and replaces newlines with spaces
+                    # Need to convert it back to proper PEM format
+                    import urllib.parse
+
+                    # URL decode if needed
+                    if '%' in ssl_cert_pem:
+                        ssl_cert_pem = urllib.parse.unquote(ssl_cert_pem)
+
+                    # Nginx escapes tabs as \t - replace with newlines
+                    ssl_cert_pem = ssl_cert_pem.replace('\t', '\n')
+
+                    # Ensure proper PEM format with headers
+                    if not ssl_cert_pem.startswith('-----BEGIN CERTIFICATE-----'):
+                        ssl_cert_pem = f"-----BEGIN CERTIFICATE-----\n{ssl_cert_pem}\n-----END CERTIFICATE-----"
+
+                    # Parse certificate
+                    cert = x509.load_pem_x509_certificate(ssl_cert_pem.encode())
+
+                    # Store in request state for authentication
+                    request.state.client_cert = cert
+
+                    logger.info(f"✅ Client certificate found (from nginx): {cert.subject.rfc4514_string()}")
+
+                except Exception as e:
+                    logger.warning(f"❌ Failed to parse client certificate from nginx: {e}")
+                    logger.debug(f"   SSL Verify: {ssl_verify}")
+                    logger.debug(f"   SSL Subject: {ssl_subject_dn}")
+                    logger.debug(f"   Cert PEM (first 100 chars): {ssl_cert_pem[:100] if ssl_cert_pem else 'None'}")
+
+            elif ssl_verify and ssl_verify != 'SUCCESS':
+                # Client sent a certificate but it failed validation
+                logger.warning(f"❌ Client certificate validation failed: {ssl_verify}")
+                logger.info(f"   Subject: {ssl_subject_dn}")
+
+            else:
+                # No client certificate presented
+                logger.info(f"ℹ️  No client certificate present (will try password auth)")
 
             response = await call_next(request)
             return response
@@ -1041,20 +1064,40 @@ class ESTServer:
 
     async def start(self) -> None:
         """Start the EST server."""
-        logger.info(f"Starting EST server on {self.config.server.host}:{self.config.server.port}")
+        # Check if running behind nginx proxy (NGINX_MODE environment variable)
+        import os
+        nginx_mode = os.getenv('NGINX_MODE', 'false').lower() == 'true'
 
-        config = uvicorn.Config(
-            app=self.app,
-            host=self.config.server.host,
-            port=self.config.server.port,
-            workers=self.config.server.workers,
-            reload=self.config.server.reload,
-            access_log=self.config.server.access_log,
-            ssl_keyfile=str(self.config.tls.key_file),
-            ssl_certfile=str(self.config.tls.cert_file),
-            ssl_ca_certs=str(self.config.tls.ca_file) if self.config.tls.ca_file else None,
-            ssl_cert_reqs=ssl.CERT_OPTIONAL,  # Allow but don't require client certs (for RA auth)
-        )
+        if nginx_mode:
+            # Running behind nginx - use HTTP only (nginx handles TLS)
+            logger.info(f"Starting EST server in NGINX MODE on http://{self.config.server.host}:{self.config.server.port}")
+            logger.info("TLS termination handled by nginx proxy")
+
+            config = uvicorn.Config(
+                app=self.app,
+                host=self.config.server.host,
+                port=self.config.server.port,
+                workers=self.config.server.workers,
+                reload=self.config.server.reload,
+                access_log=self.config.server.access_log,
+                # No SSL config - nginx handles it
+            )
+        else:
+            # Standalone mode - use HTTPS directly
+            logger.info(f"Starting EST server in STANDALONE MODE on https://{self.config.server.host}:{self.config.server.port}")
+
+            config = uvicorn.Config(
+                app=self.app,
+                host=self.config.server.host,
+                port=self.config.server.port,
+                workers=self.config.server.workers,
+                reload=self.config.server.reload,
+                access_log=self.config.server.access_log,
+                ssl_keyfile=str(self.config.tls.key_file),
+                ssl_certfile=str(self.config.tls.cert_file),
+                ssl_ca_certs=str(self.config.tls.ca_file) if self.config.tls.ca_file else None,
+                ssl_cert_reqs=ssl.CERT_OPTIONAL,  # Allow but don't require client certs (for RA auth)
+            )
 
         server = uvicorn.Server(config)
         await server.serve()
