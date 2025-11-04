@@ -35,6 +35,8 @@ python3 generate_ra_certificate.py
 python3 create_iqe_user.py
 ```
 
+**Note**: `generate_certificates_python.py` includes `10.42.56.101` in the server certificate SAN. Edit line 167 to match your server IP if different.
+
 ## Testing
 
 ```bash
