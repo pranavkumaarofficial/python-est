@@ -118,7 +118,7 @@ class ESTServer:
                                 cert = x509.load_der_x509_certificate(cert_der)
                                 # Store certificate in request state for authentication
                                 request.state.client_cert = cert
-                                logger.debug(f"Client certificate found: {cert.subject.rfc4514_string()}")
+                                logger.info(f"✅ Client certificate found: {cert.subject.rfc4514_string()}")
                         except Exception as e:
                             logger.debug(f"No client certificate in connection: {e}")
 
@@ -439,6 +439,7 @@ class ESTServer:
         # Try client certificate authentication first (for RA/gateway authentication)
         if hasattr(request.state, 'client_cert'):
             client_cert = request.state.client_cert
+            logger.info(f"🔐 Attempting RA certificate authentication...")
             try:
                 # Validate the client certificate is signed by our CA
                 if await self._validate_client_certificate(client_cert):
@@ -450,12 +451,14 @@ class ESTServer:
                             break
 
                     username = cn or "client-cert-user"
-                    logger.info(f"Client certificate authentication successful for: {username}")
+                    logger.info(f"✅ RA Certificate authentication successful for: {username}")
                     return AuthResult(authenticated=True, username=username, auth_method="client-certificate")
                 else:
-                    logger.warning(f"Client certificate validation failed: {client_cert.subject.rfc4514_string()}")
+                    logger.warning(f"❌ Client certificate validation failed: {client_cert.subject.rfc4514_string()}")
             except Exception as e:
-                logger.error(f"Client certificate authentication error: {e}")
+                logger.error(f"❌ Client certificate authentication error: {e}")
+        else:
+            logger.info(f"ℹ️  No client certificate present, falling back to password authentication")
 
         # Fall back to SRP/password authentication
         if credentials:
