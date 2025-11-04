@@ -46,10 +46,11 @@ simpleenroll_path: /.well-known/est/simpleenroll
 simplereenroll_path: /.well-known/est/simplereenroll
 
 # ⚠️ CRITICAL FOR IQE COMPATIBILITY ⚠️
-# IQE UI code has a BUG - it does NOT decode base64 despite Content-Transfer-Encoding header
-# It tries to parse base64 text directly as DER, which fails
-# Must use raw DER format (non-standard but required for buggy IQE implementation)
-response_format: der
+# IQE expects base64-encoded PKCS#7 (confirmed by Baxter EST server)
+# Baxter EST returns: Content-Transfer-Encoding: base64, Content-Type: application/pkcs7-mime
+# Response is ASCII text (base64), NOT binary DER
+# IQE UI accepts base64, then decodes internally
+response_format: base64
 
 # Security Settings
 max_cert_lifetime_days: 365
