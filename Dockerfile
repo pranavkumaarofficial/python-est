@@ -27,15 +27,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # Copy source code
 COPY src/ ./src/
-COPY examples/ ./examples/ 2>/dev/null || true
-COPY est_server.py ./ 2>/dev/null || true
-COPY est_client.py ./ 2>/dev/null || true
-COPY generate_certificates.py ./ 2>/dev/null || true
-COPY generate_certificates_python.py ./ 2>/dev/null || true
-COPY create_iqe_user.py ./ 2>/dev/null || true
-COPY generate_ra_certificate.py ./ 2>/dev/null || true
-COPY validate_setup.py ./ 2>/dev/null || true
-COPY config.example.yaml ./ 2>/dev/null || true
+
+# Copy certificate generation scripts (required for setup)
+COPY generate_certificates_python.py ./
+COPY generate_ra_certificate.py ./
+COPY create_iqe_user.py ./
 
 # Install the package (editable mode for development)
 COPY pyproject.toml ./
