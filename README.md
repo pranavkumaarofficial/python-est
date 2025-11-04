@@ -1,296 +1,461 @@
-# Python EST Server - RFC 7030 Compliant Implementation
+# Python-EST Server
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
-[![RFC 7030](https://img.shields.io/badge/RFC-7030-orange.svg)](https://tools.ietf.org/html/rfc7030)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-A production-ready Python implementation of EST (Enrollment over Secure Transport) protocol providing automated certificate enrollment services for IoT devices, enterprise systems, and PKI infrastructure.
-
-## 🎯 What is EST?
-
-EST (RFC 7030) is a protocol that enables automated certificate enrollment and management over HTTPS. It's widely used for:
-
-- **IoT Device Provisioning** - Secure certificate deployment to connected devices
-- **Enterprise PKI** - Automated certificate lifecycle management
-- **Zero-Touch Enrollment** - Device authentication without manual intervention
-- **Certificate Renewal** - Automated certificate refresh before expiration
-
-## ✨ Key Features
-
-### 🔐 **RFC 7030 Compliance**
-- Complete EST protocol implementation with all mandatory endpoints
-- Proper PKCS#7 certificate responses (not fabricated base64-encoded PEM)
-- HTTP Basic Authentication over HTTPS
-- Standards-compliant content types and headers
-
-### 🏗️ **Production Architecture**
-- **FastAPI Framework** - High-performance async/await architecture
-- **Cryptography Library** - Industry-standard cryptographic operations
-- **PKCS#7 Support** - True PKCS#7 SignedData structures using `cryptography.pkcs7`
-- **X.509 Certificate Management** - Full certificate lifecycle with proper extensions
-
-### 🛡️ **Security Features**
-- TLS 1.2/1.3 with configurable cipher suites
-- SRP (Secure Remote Password) authentication for bootstrap
-- Certificate chain validation
-- Rate limiting and security headers
-- Secure key generation (RSA 2048/3072/4096-bit)
-
-### 🖥️ **Management Interface**
-- Web-based dashboard for server monitoring and device tracking
-- REST API for device management and statistics
-- Device deletion endpoint for re-enrollment
-- Real-time enrollment statistics with human-readable device IDs
-- Duplicate device prevention with HTTP 409 Conflict
+Professional Python implementation of RFC 7030 EST (Enrollment over Secure Transport) protocol with **RA Certificate Authentication** support via Nginx reverse proxy.
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
+- Docker and Docker Compose
+- Git
+- OpenSSL (for certificate verification)
+
+### Deploy in 5 Minutes
+
 ```bash
-Python 3.8+
+# 1. Clone/navigate to project
+cd ~/python-est
+
+# 2. Deploy with nginx (RA authentication)
+docker-compose -f docker-compose-nginx.yml up -d --build
+
+# 3. Check status
+docker-compose -f docker-compose-nginx.yml ps
+
+# 4. Access dashboard
+curl -k https://localhost:8445/
+```
+
+## 📋 Features
+
+- ✅ **RFC 7030 Compliant** - Full EST protocol implementation
+- ✅ **RA Certificate Authentication** - Client certificate-based authentication
+- ✅ **SRP Authentication** - Username/password fallback
+- ✅ **Nginx Reverse Proxy** - Production-ready architecture
+- ✅ **Docker & Docker Compose** - Easy deployment
+- ✅ **Base64 & DER Response Formats** - IQE gateway compatible
+- ✅ **FastAPI Backend** - Modern, async Python framework
+- ✅ **Comprehensive Dashboard** - Real-time statistics and monitoring
+
+## 🏗️ Architecture
+
+### With Nginx (Production - RA Authentication)
+
+```
+IQE Gateway (with RA cert)
+         ↓ HTTPS (8445) + TLS Client Cert
+    ┌─────────┐
+    │  Nginx  │ TLS termination, cert extraction
+    └────┬────┘
+         ↓ HTTP (8000) + Headers
+┌────────────────┐
+│ Python EST     │ Certificate authentication & issuance
+└────────────────┘
+```
+
+### Standalone (Development)
+
+```
+Client
+   ↓ HTTPS (8445) + Basic Auth
+┌────────────────┐
+│ Python EST     │ SRP authentication & issuance
+└────────────────┘
+```
+
+## 📦 Installation
+
+### Option 1: Docker Compose with Nginx (Recommended)
+
+```bash
+# Build and start
+docker-compose -f docker-compose-nginx.yml up -d --build
+
+# View logs
+docker-compose -f docker-compose-nginx.yml logs -f
+
+# Stop
+docker-compose -f docker-compose-nginx.yml down
+```
+
+### Option 2: Standalone Docker
+
+```bash
+# Build
+docker build -t python-est-server .
+
+# Run
+docker run -d \
+  --name python-est-server \
+  -p 8445:8445 \
+  -v $(pwd)/certs:/app/certs \
+  -v $(pwd)/data:/app/data \
+  -v $(pwd)/config-iqe.yaml:/app/config.yaml \
+  python-est-server
+
+# Logs
+docker logs -f python-est-server
+```
+
+### Option 3: Local Development
+
+```bash
+# Install dependencies
 pip install -r requirements.txt
+
+# Run server
+python -m python_est.cli start --config config-iqe.yaml
 ```
-
-### 1. Setup Certificates
-
-```bash
-# Generate CA and server certificates
-python generate_certificates.py
-
-# Validate setup
-python validate_setup.py
-```
-
-### 2. Start EST Server
-
-```bash
-python est_server.py
-```
-
-The server will start on `https://localhost:8445` with these endpoints:
-
-- **Dashboard**: `https://localhost:8445/`
-- **EST CA Certificates**: `https://localhost:8445/.well-known/est/cacerts`
-- **EST Bootstrap**: `https://localhost:8445/.well-known/est/bootstrap`
-- **EST Enrollment**: `https://localhost:8445/.well-known/est/simpleenroll`
-
-Default credentials: `estuser` / `estpass123`
-
-### 3. Enroll Devices
-
-```bash
-# Complete EST enrollment flow
-python est_client.py https://localhost:8445 my-device-001 estuser estpass123
-
-# Enroll multiple devices
-python est_client.py https://localhost:8445 warehouse-scanner-01 estuser estpass123
-python est_client.py https://localhost:8445 iot-sensor-42 estuser estpass123
-```
-
-This creates a device directory with:
-- Private key (`.key`) - **Generated on client side only**
-- Certificate Signing Request (`.csr`)
-- CA certificates (`.p7b`)
-- Bootstrap certificate (`.pem`)
-- Enrolled certificate (`.pem`)
-- Certificate bundle (`.tar.gz`)
-
-### 4. Manage Devices
-
-```bash
-# List all devices
-curl -k https://localhost:8445/api/devices
-
-# Delete a device (for re-enrollment)
-curl -k -X DELETE https://localhost:8445/api/devices/my-device-001
-
-# Re-enroll after deletion
-python est_client.py https://localhost:8445 my-device-001 estuser estpass123
-```
-
-**Note**: Duplicate device IDs are rejected with HTTP 409 Conflict. Delete the device first to re-enroll.
-
-## 📚 EST Protocol Implementation
-
-### Supported Endpoints
-
-| Endpoint | Method | Purpose | Authentication |
-|----------|--------|---------|----------------|
-| `/cacerts` | GET | Retrieve CA certificates | None |
-| `/bootstrap` | POST | Initial device enrollment (CSR required) | HTTP Basic |
-| `/simpleenroll` | POST | Certificate enrollment | HTTP Basic |
-| `/simplereenroll` | POST | Certificate renewal | Client Cert |
-
-### Management API Endpoints
-
-| Endpoint | Method | Purpose | Response |
-|----------|--------|---------|----------|
-| `/api/devices` | GET | List all enrolled devices | JSON |
-| `/api/devices/{id}` | DELETE | Remove device (allows re-enrollment) | JSON |
-| `/api/stats` | GET | Server statistics | JSON |
-| `/api/status` | GET | Server status | JSON |
-
-### Certificate Flow
-
-```mermaid
-graph TD
-    A[Device] -->|1. GET /cacerts| B[EST Server]
-    B -->|2. PKCS#7 CA certs| A
-    A -->|3. POST /bootstrap + CSR| B
-    B -->|4. PKCS#7 certificate| A
-    A -->|5. POST /simpleenroll + CSR| B
-    B -->|6. PKCS#7 certificate| A
-```
-
-### Technical Standards
-
-- **PKCS#10** - Certificate Signing Requests
-- **PKCS#7** - Certificate responses (SignedData format)
-- **X.509v3** - Digital certificates with proper extensions
-- **HTTP Basic Auth** - Authentication over HTTPS
-- **Content-Type**: `application/pkcs7-mime` for responses
-- **Content-Type**: `application/pkcs10` for requests
 
 ## 🔧 Configuration
 
-### Server Configuration (`config.yaml`)
+### Nginx Mode (RA Authentication)
+
+**Use `config-nginx.yaml`:**
 
 ```yaml
 server:
   host: 0.0.0.0
-  port: 8445
-  workers: 4
+  port: 8000  # HTTP (nginx forwards here)
 
-tls:
-  cert_file: certs/server.crt
-  key_file: certs/server.key
-  min_version: TLSv1.2
-
-ca:
-  ca_cert: certs/ca-cert.pem
-  ca_key: certs/ca-key.pem
-  cert_validity_days: 365
-  key_size: 2048
-  digest_algorithm: sha256
-
-bootstrap_enabled: true
-require_client_cert: false
-rate_limit_enabled: true
+response_format: base64  # For IQE compatibility
 ```
 
-### Production Deployment
+**Docker Compose:**
+
+```yaml
+environment:
+  - NGINX_MODE=true
+  - PORT=8000
+volumes:
+  - ./config-nginx.yaml:/app/config.yaml:ro
+```
+
+### Standalone Mode
+
+**Use `config-iqe.yaml`:**
+
+```yaml
+server:
+  host: 0.0.0.0
+  port: 8445  # HTTPS
+
+response_format: base64
+```
+
+## 🔐 Certificate Management
+
+### Generate Certificates
 
 ```bash
-# Using Docker
-docker build -t python-est-server .
-docker run -d -p 8445:8445 \
-  -v $(pwd)/config.yaml:/app/config.yaml \
-  -v $(pwd)/certs:/app/certs \
-  python-est-server
+# Generate CA and server certificates
+python3 generate_certificates_python.py
 
-# Using systemd
-sudo cp est-server.service /etc/systemd/system/
-sudo systemctl enable est-server
-sudo systemctl start est-server
+# Create bootstrap user
+python3 create_iqe_user.py
+
+# Generate RA certificate for IQE gateway
+python3 generate_ra_certificate.py
 ```
 
-## 🧪 Examples
+### Verify Certificates
 
-### Basic EST Client
+```bash
+# Verify server certificate
+openssl verify -CAfile certs/ca-cert.pem certs/server.crt
 
-```python
-import requests
+# Verify RA certificate
+openssl verify -CAfile certs/ca-cert.pem certs/iqe-ra-cert.pem
+
+# Check certificate details
+openssl x509 -in certs/server.crt -noout -text
+```
+
+## 🧪 Testing
+
+### Test Health Endpoint
+
+```bash
+# Via nginx
+curl -k https://localhost:8445/health
+
+# Direct to backend (nginx mode)
+docker exec python-est-server curl http://localhost:8000/health
+```
+
+### Test CA Certificates
+
+```bash
+curl -k https://localhost:8445/.well-known/est/cacerts -o cacerts.p7
+
+# Verify PKCS#7
+file cacerts.p7
+base64 -d cacerts.p7 | openssl pkcs7 -inform DER -print_certs
+```
+
+### Test RA Authentication
+
+```bash
+# Generate test CSR
+python3 << 'EOF'
 from cryptography import x509
-from cryptography.hazmat.primitives import serialization
+from cryptography.x509.oid import NameOID
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
-# 1. Get CA certificates
-response = requests.get('https://localhost:8445/.well-known/est/cacerts', verify=False)
-ca_certs = response.content
+key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+csr = x509.CertificateSigningRequestBuilder().subject_name(x509.Name([
+    x509.NameAttribute(NameOID.COUNTRY_NAME, 'US'),
+    x509.NameAttribute(NameOID.ORGANIZATION_NAME, 'Hospital'),
+    x509.NameAttribute(NameOID.COMMON_NAME, 'test-device'),
+])).sign(key, hashes.SHA256())
 
-# 2. Generate CSR
-# ... (key generation and CSR creation)
+with open('/tmp/test.der', 'wb') as f:
+    f.write(csr.public_bytes(serialization.Encoding.DER))
+print("CSR created at /tmp/test.der")
+EOF
 
-# 3. Bootstrap enrollment
-response = requests.post(
-    'https://localhost:8445/.well-known/est/bootstrap',
-    data=csr_pem,
-    headers={'Content-Type': 'application/pkcs10'},
-    auth=('estuser', 'estpass123'),
-    verify=False
-)
-certificate_pkcs7 = response.content
+# Enroll with RA certificate
+curl -vk https://localhost:8445/.well-known/est/simpleenroll \
+  --cert certs/iqe-ra-cert.pem \
+  --key certs/iqe-ra-key.pem \
+  -H "Content-Type: application/pkcs10" \
+  --data-binary @/tmp/test.der \
+  -o device-cert.p7
+
+# Expected: HTTP 200
 ```
 
-### Demo Scripts
+## 📊 Monitoring
+
+### Dashboard
+
+Access at: **https://localhost:8445/**
+
+Shows:
+- Server statistics
+- Connected devices
+- Recent activity
+- Certificate issuance metrics
+
+### Logs
 
 ```bash
-# Interactive demo with web interface
-python examples/est_demo_interactive.py
+# All logs
+docker-compose -f docker-compose-nginx.yml logs -f
 
-# Multi-client enrollment demo
-python examples/est_multi_client_demo.py
+# Python server only
+docker-compose -f docker-compose-nginx.yml logs -f python-est-server
 
-# Basic EST operations demo
-python examples/est_basic_demo.py
+# Nginx only
+docker-compose -f docker-compose-nginx.yml logs -f nginx
+
+# Filter for RA authentication
+docker-compose -f docker-compose-nginx.yml logs python-est-server | grep "Client certificate"
 ```
 
 ## 🔍 Troubleshooting
 
 ### Common Issues
 
-1. **Certificate Validation Errors**
+#### HTTP 401 Unauthorized
+
+**Cause**: RA certificate not being sent or validated
+
+**Fix**:
+```bash
+# Check nginx is forwarding headers
+docker exec est-nginx cat /etc/nginx/nginx.conf | grep "X-SSL-Client"
+
+# Check Python is receiving headers
+docker-compose -f docker-compose-nginx.yml logs python-est-server | grep "Client certificate"
+```
+
+#### Port Already in Use
+
+**Cause**: Port 8445 is occupied
+
+**Fix**:
+```bash
+# Find what's using the port
+sudo lsof -i :8445
+
+# Stop old containers
+docker-compose -f docker-compose-nginx.yml down
+docker stop python-est-server 2>/dev/null || true
+```
+
+#### Certificate Validation Failed
+
+**Cause**: Certificate chain mismatch
+
+**Fix**:
+```bash
+# Regenerate all certificates together
+rm -rf certs/*
+python3 generate_certificates_python.py
+python3 create_iqe_user.py
+python3 generate_ra_certificate.py
+```
+
+### Debug Commands
+
+```bash
+# Check container status
+docker-compose -f docker-compose-nginx.yml ps
+
+# Exec into Python container
+docker exec -it python-est-server bash
+
+# Exec into nginx container
+docker exec -it est-nginx sh
+
+# Test backend connectivity
+docker exec est-nginx wget -O- http://python-est-server:8000/health
+
+# View nginx config
+docker exec est-nginx cat /etc/nginx/nginx.conf
+```
+
+## 📚 Documentation
+
+- **[NGINX_DEPLOYMENT_GUIDE.md](NGINX_DEPLOYMENT_GUIDE.md)** - Complete nginx deployment guide
+- **[MANUAL_DEPLOYMENT.md](MANUAL_DEPLOYMENT.md)** - Step-by-step manual commands
+- **[QUICK_START_NGINX.md](QUICK_START_NGINX.md)** - Quick reference
+- **[FIXES_APPLIED.md](FIXES_APPLIED.md)** - Recent bug fixes
+- **[RA_AUTH_IMPLEMENTATION.md](RA_AUTH_IMPLEMENTATION.md)** - RA authentication details
+
+## 🚀 Deployment
+
+### Production Checklist
+
+Before deploying to production:
+
+- [ ] Generate fresh certificates
+- [ ] Verify certificate chain
+- [ ] Configure firewall (allow port 8445)
+- [ ] Set up monitoring
+- [ ] Configure backups for `data/` directory
+- [ ] Review security settings in config
+- [ ] Test RA authentication
+- [ ] Test fallback password authentication
+- [ ] Document restart procedure
+- [ ] Set up log rotation
+
+### IQE Integration
+
+For IQE gateway integration:
+
+1. **Generate RA certificate**: `python3 generate_ra_certificate.py`
+2. **Package files**:
    ```bash
-   # Verify PKCS#7 structure
-   openssl pkcs7 -inform DER -in cert.p7b -print_certs
+   mkdir iqe_deployment_package
+   cp certs/ca-cert.pem iqe_deployment_package/
+   cp certs/iqe-ra-cert.pem iqe_deployment_package/
+   cp certs/iqe-ra-key.pem iqe_deployment_package/
+   ```
+3. **Transfer to IQE team**
+4. **IQE configuration**:
+   ```yaml
+   est_server:
+     url: https://10.42.56.101:8445
+     ca_cert: /path/to/ca-cert.pem
+     client_cert: /path/to/iqe-ra-cert.pem
+     client_key: /path/to/iqe-ra-key.pem
    ```
 
-2. **Authentication Failures**
-   ```bash
-   # Check credentials in SRP database
-   python examples/create_srp_users.py
-   ```
+## 🛠️ Development
 
-3. **TLS Connection Issues**
-   ```bash
-   # Test with self-signed certificates
-   curl -k https://localhost:8445/.well-known/est/cacerts
-   ```
-
-## 🏗️ Architecture
+### Project Structure
 
 ```
 python-est/
-├── src/python_est/          # Core EST implementation
-│   ├── server.py            # FastAPI EST server
-│   ├── ca.py                # Certificate Authority
-│   ├── config.py            # Configuration management
-│   └── auth/                # Authentication modules
-├── est_server.py            # Main server launcher
-├── est_client.py            # RFC 7030 compliant client
-├── examples/                # Demo and example scripts
-├── certs/                   # Certificate storage
-└── config.yaml             # Server configuration
+├── src/
+│   └── python_est/
+│       ├── server.py       # FastAPI server
+│       ├── ca.py           # Certificate authority
+│       ├── auth.py         # SRP authentication
+│       ├── config.py       # Configuration management
+│       └── cli.py          # Command-line interface
+├── nginx/
+│   └── nginx.conf          # Nginx configuration
+├── docker/
+│   └── entrypoint.sh       # Docker entrypoint
+├── certs/                  # Certificates (generated)
+├── data/                   # Database (runtime)
+├── Dockerfile              # Docker image definition
+├── docker-compose-nginx.yml # Docker Compose for nginx mode
+├── requirements.txt        # Python dependencies
+└── pyproject.toml          # Package metadata
 ```
 
-## 🤝 Contributing
+### Running Tests
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with tests
-4. Submit a pull request
+```bash
+# Install dev dependencies
+pip install -r requirements.txt
+pip install pytest pytest-asyncio
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+# Run tests
+pytest tests/
+
+# With coverage
+pytest --cov=python_est tests/
+```
+
+### Making Changes
+
+```bash
+# 1. Make code changes
+vim src/python_est/server.py
+
+# 2. Rebuild Docker image
+docker-compose -f docker-compose-nginx.yml build --no-cache
+
+# 3. Restart services
+docker-compose -f docker-compose-nginx.yml up -d
+
+# 4. Check logs
+docker-compose -f docker-compose-nginx.yml logs -f
+```
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - See LICENSE file for details
 
-## 🔗 References
+## 👤 Author
 
-- [RFC 7030 - Enrollment over Secure Transport](https://tools.ietf.org/html/rfc7030)
-- [PKCS #10: Certification Request Syntax Specification](https://tools.ietf.org/html/rfc2986)
-- [PKCS #7: Cryptographic Message Syntax](https://tools.ietf.org/html/rfc2315)
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [Python Cryptography Library](https://cryptography.io/)
+**Pranav Kumaar**
+
+## 🤝 Contributing
+
+Contributions welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Submit a pull request
+
+## 📞 Support
+
+For issues or questions:
+
+1. Check the [documentation](#-documentation)
+2. Review [troubleshooting](#-troubleshooting)
+3. Open an issue on GitHub
+
+## 🔗 Links
+
+- **RFC 7030**: https://tools.ietf.org/html/rfc7030
+- **FastAPI**: https://fastapi.tiangolo.com/
+- **Nginx**: https://nginx.org/
+- **Docker**: https://www.docker.com/
+
+---
+
+**Status**: Production-Ready ✅
+
+**Last Updated**: 2025-11-04
+
+**Version**: 1.0.0
