@@ -99,15 +99,21 @@ class ESTServer:
         @self.app.middleware("http")
         async def extract_client_cert(request: Request, call_next):
             """Extract client certificate from TLS connection and add to request state."""
+            logger.info(f"🔍 Middleware executing for: {request.method} {request.url.path}")
+
             # In production HTTPS with client certs, the certificate is available via scope
             # uvicorn provides it in request.scope['transport']
             client_cert_pem = None
 
             if hasattr(request, 'scope'):
+                logger.info(f"🔍 Request has scope attribute")
                 # Try to get SSL object from scope (uvicorn provides this)
                 transport = request.scope.get('transport')
+                logger.info(f"🔍 Transport: {transport}")
                 if transport and hasattr(transport, 'get_extra_info'):
+                    logger.info(f"🔍 Transport has get_extra_info")
                     ssl_object = transport.get_extra_info('ssl_object')
+                    logger.info(f"🔍 SSL object: {ssl_object}")
                     if ssl_object:
                         try:
                             # Get peer certificate in DER format
