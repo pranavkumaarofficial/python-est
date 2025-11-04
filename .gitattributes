@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell scripts must use LF (Unix line endings) for Docker
+*.sh text eol=lf
