@@ -10,7 +10,7 @@ server:
   workers: 1
   reload: false
   access_log: true
-  debug: false
+  debug: true
 
 # TLS config still needed for certificate operations (signing, validation)
 # But NOT for server TLS (nginx handles that)

@@ -109,38 +109,16 @@ class ESTServer:
             # Get client certificate verification status from nginx
             ssl_verify = request.headers.get('X-SSL-Client-Verify', '')
             ssl_subject_dn = request.headers.get('X-SSL-Client-S-DN', '')
-            ssl_cert_pem = request.headers.get('X-SSL-Client-Cert', '')
 
-            if ssl_cert_pem and ssl_verify == 'SUCCESS':
-                try:
-                    # Nginx URL-encodes the certificate and replaces newlines with spaces
-                    # Need to convert it back to proper PEM format
-                    import urllib.parse
+            # If nginx verified the client cert, trust it (simplified approach)
+            if ssl_verify == 'SUCCESS' and ssl_subject_dn:
+                # Create a marker object to indicate cert was validated
+                class ValidatedClientCert:
+                    def __init__(self, subject_dn):
+                        self.subject_dn = subject_dn
 
-                    # URL decode if needed
-                    if '%' in ssl_cert_pem:
-                        ssl_cert_pem = urllib.parse.unquote(ssl_cert_pem)
-
-                    # Nginx escapes tabs as \t - replace with newlines
-                    ssl_cert_pem = ssl_cert_pem.replace('\t', '\n')
-
-                    # Ensure proper PEM format with headers
-                    if not ssl_cert_pem.startswith('-----BEGIN CERTIFICATE-----'):
-                        ssl_cert_pem = f"-----BEGIN CERTIFICATE-----\n{ssl_cert_pem}\n-----END CERTIFICATE-----"
-
-                    # Parse certificate
-                    cert = x509.load_pem_x509_certificate(ssl_cert_pem.encode())
-
-                    # Store in request state for authentication
-                    request.state.client_cert = cert
-
-                    logger.info(f"✅ Client certificate found (from nginx): {cert.subject.rfc4514_string()}")
-
-                except Exception as e:
-                    logger.warning(f"❌ Failed to parse client certificate from nginx: {e}")
-                    logger.debug(f"   SSL Verify: {ssl_verify}")
-                    logger.debug(f"   SSL Subject: {ssl_subject_dn}")
-                    logger.debug(f"   Cert PEM (first 100 chars): {ssl_cert_pem[:100] if ssl_cert_pem else 'None'}")
+                request.state.client_cert_validated = ValidatedClientCert(ssl_subject_dn)
+                logger.info(f"✅ Client certificate validated by nginx: {ssl_subject_dn}")
 
             elif ssl_verify and ssl_verify != 'SUCCESS':
                 # Client sent a certificate but it failed validation
@@ -362,7 +340,7 @@ class ESTServer:
         @self.app.post("/.well-known/est/simpleenroll")
         async def simple_enrollment(
             request: Request,
-            credentials: HTTPBasicCredentials = Depends(HTTPBasic())
+            credentials: Optional[HTTPBasicCredentials] = Depends(HTTPBasic(auto_error=False))
         ) -> Response:
             """
             Simple certificate enrollment (RFC 7030 Section 4.2)
@@ -474,26 +452,14 @@ class ESTServer:
     async def _authenticate_request(self, request: Request, credentials: Optional[HTTPBasicCredentials]) -> 'AuthResult':
         """Authenticate EST request using SRP or client certificate."""
         # Try client certificate authentication first (for RA/gateway authentication)
-        if hasattr(request.state, 'client_cert'):
-            client_cert = request.state.client_cert
-            logger.info(f"🔐 Attempting RA certificate authentication...")
-            try:
-                # Validate the client certificate is signed by our CA
-                if await self._validate_client_certificate(client_cert):
-                    # Extract username from certificate CN
-                    cn = None
-                    for attr in client_cert.subject:
-                        if attr.oid == NameOID.COMMON_NAME:
-                            cn = attr.value
-                            break
-
-                    username = cn or "client-cert-user"
-                    logger.info(f"✅ RA Certificate authentication successful for: {username}")
-                    return AuthResult(authenticated=True, username=username, auth_method="client-certificate")
-                else:
-                    logger.warning(f"❌ Client certificate validation failed: {client_cert.subject.rfc4514_string()}")
-            except Exception as e:
-                logger.error(f"❌ Client certificate authentication error: {e}")
+        if hasattr(request.state, 'client_cert_validated'):
+            # Nginx already validated the cert, trust it
+            cert_info = request.state.client_cert_validated
+            logger.info(f"🔐 RA certificate authentication (nginx validated)")
+            # Extract CN from subject DN
+            username = cert_info.subject_dn.split('CN=')[-1].split(',')[0] if 'CN=' in cert_info.subject_dn else "ra-user"
+            logger.info(f"✅ RA Certificate authentication successful for: {username}")
+            return AuthResult(authenticated=True, username=username, auth_method="client-certificate")
         else:
             logger.info(f"ℹ️  No client certificate present, falling back to password authentication")
 
