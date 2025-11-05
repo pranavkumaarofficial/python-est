@@ -23,7 +23,7 @@ tls:
 
 srp:
   enabled: true
-  user_db: certs/srp_users.db
+  user_db: data/srp_users.db
   salt_length: 32
   verifier_length: 256
 

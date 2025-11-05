@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy source code
 COPY src/ ./src/
 COPY pyproject.toml ./
+COPY README.md ./
 COPY generate_certificates_python.py ./
 COPY generate_ra_certificate.py ./
 COPY create_iqe_user.py ./
