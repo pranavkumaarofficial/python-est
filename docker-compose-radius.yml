@@ -1,0 +1,61 @@
+# FreeRADIUS - Standalone Deployment
+#
+# This is a DECOUPLED FreeRADIUS deployment that runs independently
+# on a separate VM from the EST server.
+#
+# Architecture:
+#   Medical Pumps → Cisco WLC → THIS RADIUS SERVER (validates certs)
+#
+# Requirements:
+#   1. EST CA certificate (ca-cert.pem) - copied to ./radius-certs/
+#   2. FreeRADIUS server certificate (generated locally)
+#   3. Cisco WLC IP and shared secret configured in radius/clients.conf
+#
+# This container does NOT depend on EST server or share networks with it.
+
+version: '3.8'
+
+services:
+  freeradius:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.radius
+    container_name: freeradius-server
+    hostname: freeradius-server
+
+    # Expose RADIUS ports on host network
+    # This allows Cisco WLC from external network to reach RADIUS
+    network_mode: host
+
+    volumes:
+      # RADIUS-specific certificate directory (independent from EST)
+      - ./radius-certs:/etc/freeradius/certs/ca:ro
+
+      # RADIUS configuration files
+      - ./radius/clients.conf:/etc/freeradius/clients.conf:ro
+      - ./radius/eap:/etc/freeradius/mods-enabled/eap:ro
+      - ./radius/radiusd.conf:/etc/freeradius/radiusd.conf:ro
+
+      # RADIUS server certificates (generated on RADIUS VM)
+      - ./radius-server-certs:/etc/freeradius/certs/server:ro
+
+      # Persistent logs
+      - radius_logs:/var/log/freeradius
+
+    environment:
+      - TZ=Asia/Kolkata
+      - FREERADIUS_DEBUG=true  # Set to false in production
+
+    restart: unless-stopped
+
+    # Health check via radtest
+    healthcheck:
+      test: ["CMD", "sh", "-c", "radtest test test localhost 0 testing123 2>&1 | grep -q 'Access-Reject'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  radius_logs:
+    driver: local

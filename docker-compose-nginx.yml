@@ -13,7 +13,7 @@ services:
   python-est-server:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: docker/Dockerfile
     container_name: python-est-server
     hostname: python-est-server
 

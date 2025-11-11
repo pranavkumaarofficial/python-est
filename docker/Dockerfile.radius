@@ -1,0 +1,27 @@
+# FreeRADIUS Dockerfile for EST Certificate Validation
+FROM freeradius/freeradius-server:latest
+
+# Install additional tools
+RUN apt-get update && apt-get install -y \
+    openssl \
+    vim \
+    net-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create directories for certificates
+RUN mkdir -p /etc/freeradius/certs/est
+
+# Copy configuration files
+COPY radius/radiusd.conf /etc/freeradius/radiusd.conf
+COPY radius/clients.conf /etc/freeradius/clients.conf
+COPY radius/eap /etc/freeradius/mods-enabled/eap
+
+# Expose RADIUS ports
+EXPOSE 1812/udp 1813/udp
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD radiusd -X -l stdout 2>&1 | grep -q "Ready to process requests" || exit 1
+
+# Run FreeRADIUS in foreground
+CMD ["freeradius", "-X"]
