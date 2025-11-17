@@ -7,7 +7,7 @@ eap {
     timer_expire = 60
     ignore_unknown_eap_types = no
     cisco_accounting_username_bug = no
-    max_sessions = ${max_requests}
+    max_sessions = 1024
 
     # TLS Configuration for EAP-TLS
     tls-config tls-common {
@@ -20,8 +20,8 @@ eap {
         # CRITICAL: This must be your Python-EST CA certificate (copied from EST VM)
         ca_file = /etc/freeradius/certs/ca/ca-cert.pem
 
-        # Diffie-Hellman and Elliptic Curve Diffie-Hellman parameters
-        dh_file = ${certdir}/dh
+        # Diffie-Hellman parameters (commented out for POC - not critical for testing)
+        # dh_file = ${certdir}/dh
 
         # Certificate Revocation List (optional, for now)
         # ca_path = ${cadir}

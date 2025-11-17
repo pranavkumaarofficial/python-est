@@ -1,11 +1,14 @@
 # FreeRADIUS Dockerfile for EST Certificate Validation
 FROM freeradius/freeradius-server:latest
 
-# Install additional tools
+# Install additional tools including eapol_test for EAP-TLS testing
 RUN apt-get update && apt-get install -y \
     openssl \
     vim \
     net-tools \
+    wpasupplicant \
+    libnl-3-dev \
+    libnl-genl-3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directories for certificates
@@ -16,12 +19,24 @@ COPY radius/radiusd.conf /etc/freeradius/radiusd.conf
 COPY radius/clients.conf /etc/freeradius/clients.conf
 COPY radius/eap /etc/freeradius/mods-enabled/eap
 
+# Fix permissions (FreeRADIUS requires strict permissions)
+RUN chmod 640 /etc/freeradius/radiusd.conf && \
+    chmod 640 /etc/freeradius/clients.conf && \
+    chmod 640 /etc/freeradius/mods-enabled/eap && \
+    chown -R freerad:freerad /etc/freeradius && \
+    chmod 755 /etc/freeradius/certs/est && \
+    chmod 755 /etc/freeradius/certs
+
+# Copy entrypoint script
+COPY docker/radius-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Expose RADIUS ports
 EXPOSE 1812/udp 1813/udp
 
-# Health check
+# Health check - verify RADIUS is listening on port 1812
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD radiusd -X -l stdout 2>&1 | grep -q "Ready to process requests" || exit 1
+    CMD netstat -uln | grep -q ":1812" || exit 1
 
-# Run FreeRADIUS in foreground
-CMD ["freeradius", "-X"]
+# Run entrypoint
+ENTRYPOINT ["/entrypoint.sh"]

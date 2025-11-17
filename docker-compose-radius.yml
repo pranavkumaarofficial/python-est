@@ -29,15 +29,10 @@ services:
 
     volumes:
       # RADIUS-specific certificate directory (independent from EST)
-      - ./radius-certs:/etc/freeradius/certs/ca:ro
-
-      # RADIUS configuration files
-      - ./radius/clients.conf:/etc/freeradius/clients.conf:ro
-      - ./radius/eap:/etc/freeradius/mods-enabled/eap:ro
-      - ./radius/radiusd.conf:/etc/freeradius/radiusd.conf:ro
+      - ./radius-certs:/etc/freeradius/certs/ca
 
       # RADIUS server certificates (generated on RADIUS VM)
-      - ./radius-server-certs:/etc/freeradius/certs/server:ro
+      - ./radius-server-certs:/etc/freeradius/certs/server
 
       # Persistent logs
       - radius_logs:/var/log/freeradius
