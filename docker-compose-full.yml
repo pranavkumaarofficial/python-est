@@ -1,0 +1,113 @@
+# Complete Docker Compose: EST Server + FreeRADIUS
+#
+# Architecture:
+#   Medical Pumps → Cisco WLC → FreeRADIUS (802.1X validation)
+#   IQE Gateway → Nginx → Python EST Server (Certificate issuance)
+
+version: '3.8'
+
+services:
+  # Python EST Server (Certificate Issuance)
+  python-est-server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: python-est-server
+    hostname: python-est-server
+
+    expose:
+      - "8000"
+
+    volumes:
+      - ./certs:/app/certs:ro
+      - ./data:/app/data
+      - ./config-nginx.yaml:/app/config.yaml:ro
+
+    environment:
+      - NGINX_MODE=true
+      - PORT=8000
+      - PYTHONUNBUFFERED=1
+
+    networks:
+      - est_network
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    restart: unless-stopped
+
+  # Nginx (TLS Termination for EST)
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: est-nginx
+    hostname: est-nginx
+
+    ports:
+      - "8445:8445"
+
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+      - nginx_logs:/var/log/nginx
+
+    depends_on:
+      python-est-server:
+        condition: service_healthy
+
+    networks:
+      - est_network
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://python-est-server:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    restart: unless-stopped
+
+  # FreeRADIUS (802.1X Authentication)
+  freeradius:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.radius
+    container_name: freeradius-server
+    hostname: freeradius-server
+
+    ports:
+      - "1812:1812/udp"  # RADIUS Authentication
+      - "1813:1813/udp"  # RADIUS Accounting
+
+    volumes:
+      - ./certs:/etc/freeradius/certs/est:ro
+      - ./radius/clients.conf:/etc/freeradius/clients.conf:ro
+      - ./radius/eap:/etc/freeradius/mods-enabled/eap:ro
+      - radius_logs:/var/log/freeradius
+
+    networks:
+      - est_network
+
+    environment:
+      - TZ=Asia/Kolkata
+
+    restart: unless-stopped
+
+    # FreeRADIUS runs in foreground with -X flag for debugging
+    # Remove -X in production for better performance
+
+networks:
+  est_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  nginx_logs:
+    driver: local
+  radius_logs:
+    driver: local

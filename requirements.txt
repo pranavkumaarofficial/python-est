@@ -8,6 +8,7 @@ pytz>=2023.3
 
 # Cryptography
 cryptography>=41.0.0
+tlslite-ng>=0.8.0
 pydantic>=2.0.0
 
 # HTTP Client

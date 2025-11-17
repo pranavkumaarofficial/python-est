@@ -1,0 +1,53 @@
+# EST Server Configuration for Nginx Proxy Mode
+#
+# This configuration is for running the EST server behind nginx
+# Nginx handles TLS termination and client certificate extraction
+# The Python EST server runs on HTTP (port 8000)
+
+server:
+  host: 0.0.0.0
+  port: 8000  # HTTP port (nginx forwards here)
+  workers: 1
+  reload: false
+  access_log: true
+  debug: true
+
+# TLS config still needed for certificate operations (signing, validation)
+# But NOT for server TLS (nginx handles that)
+tls:
+  cert_file: certs/server.crt
+  key_file: certs/server.key
+  ca_file: certs/ca-cert.pem
+  min_version: TLSv1.2
+  max_version: TLSv1.3
+
+srp:
+  enabled: true
+  user_db: data/srp_users.db
+  salt_length: 32
+  verifier_length: 256
+
+ca:
+  ca_cert: certs/ca-cert.pem
+  ca_key: certs/ca-key.pem
+  ca_key_password: null
+  cert_validity_days: 365
+  key_size: 2048
+  digest_algorithm: sha256
+
+# EST Protocol Settings
+bootstrap_enabled: true
+bootstrap_path: /.well-known/est/bootstrap
+cacerts_path: /.well-known/est/cacerts
+simpleenroll_path: /.well-known/est/simpleenroll
+simplereenroll_path: /.well-known/est/simplereenroll
+
+# Response format for IQE compatibility
+response_format: base64
+
+# Security Settings
+max_cert_lifetime_days: 365
+require_client_cert: false  # Nginx handles client cert validation
+rate_limit_enabled: true
+rate_limit_requests: 100
+rate_limit_window: 3600

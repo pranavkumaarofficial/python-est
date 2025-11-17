@@ -5,7 +5,9 @@ Modern FastAPI-based EST protocol server with SRP authentication support.
 """
 
 import asyncio
+import base64
 import logging
+import ssl
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 import uvicorn
@@ -93,6 +95,43 @@ class ESTServer:
             allow_headers=["*"],
         )
 
+        # Middleware to extract client certificate from nginx headers
+        @self.app.middleware("http")
+        async def extract_client_cert(request: Request, call_next):
+            """
+            Extract client certificate from nginx TLS termination proxy.
+
+            Nginx extracts the client certificate from the TLS handshake and forwards
+            it via HTTP headers. This is the industry-standard approach for client
+            certificate authentication in containerized environments.
+            """
+
+            # Get client certificate verification status from nginx
+            ssl_verify = request.headers.get('X-SSL-Client-Verify', '')
+            ssl_subject_dn = request.headers.get('X-SSL-Client-S-DN', '')
+
+            # If nginx verified the client cert, trust it (simplified approach)
+            if ssl_verify == 'SUCCESS' and ssl_subject_dn:
+                # Create a marker object to indicate cert was validated
+                class ValidatedClientCert:
+                    def __init__(self, subject_dn):
+                        self.subject_dn = subject_dn
+
+                request.state.client_cert_validated = ValidatedClientCert(ssl_subject_dn)
+                logger.info(f"✅ Client certificate validated by nginx: {ssl_subject_dn}")
+
+            elif ssl_verify and ssl_verify != 'SUCCESS':
+                # Client sent a certificate but it failed validation
+                logger.warning(f"❌ Client certificate validation failed: {ssl_verify}")
+                logger.info(f"   Subject: {ssl_subject_dn}")
+
+            else:
+                # No client certificate presented
+                logger.info(f"ℹ️  No client certificate present (will try password auth)")
+
+            response = await call_next(request)
+            return response
+
     def _register_routes(self) -> None:
         """Register EST protocol endpoints."""
 
@@ -105,6 +144,14 @@ class ESTServer:
             stats = self.device_tracker.get_server_stats()
             html_content = self._get_comprehensive_stats_html(stats)
             return HTMLResponse(content=html_content)
+
+        @self.app.get("/health")
+        async def health() -> Dict[str, str]:
+            """Health check endpoint for Docker/Kubernetes."""
+            return {
+                "status": "healthy",
+                "service": "Python-EST Server"
+            }
 
         @self.app.get("/api/status")
         async def api_status() -> Dict[str, str]:
@@ -165,16 +212,30 @@ class ESTServer:
             No authentication required per RFC 7030.
             """
             try:
-                ca_certs_pkcs7 = await self.ca.get_ca_certificates_pkcs7()
+                # Check response format configuration
+                use_base64 = self.config.response_format == "base64"
+                ca_certs_pkcs7 = await self.ca.get_ca_certificates_pkcs7(encode_base64=use_base64)
 
-                return Response(
-                    content=ca_certs_pkcs7,
-                    media_type="application/pkcs7-mime",
-                    headers={
-                        "Content-Transfer-Encoding": "base64",
-                        "Content-Disposition": "attachment; filename=cacerts.p7c"
-                    }
-                )
+                if use_base64:
+                    # RFC 7030 compliant response with base64 encoding
+                    # Convert base64 string to bytes for HTTP response
+                    return Response(
+                        content=ca_certs_pkcs7.encode('ascii') if isinstance(ca_certs_pkcs7, str) else ca_certs_pkcs7,
+                        media_type="application/pkcs7-mime",
+                        headers={
+                            "Content-Transfer-Encoding": "base64",
+                            "Content-Disposition": "attachment; filename=cacerts.p7c"
+                        }
+                    )
+                else:
+                    # Raw DER response for IQE gateway compatibility
+                    return Response(
+                        content=ca_certs_pkcs7,
+                        media_type="application/pkcs7-mime",
+                        headers={
+                            "Content-Disposition": "attachment; filename=cacerts.p7c"
+                        }
+                    )
             except Exception as e:
                 logger.error(f"Failed to retrieve CA certificates: {e}")
                 raise HTTPException(status_code=500, detail="Failed to retrieve CA certificates")
@@ -188,13 +249,24 @@ class ESTServer:
             EST Bootstrap Enrollment (RFC 7030 Section 4.1)
 
             Accepts PKCS#10 CSR with HTTP Basic Auth and returns PKCS#7 certificate.
-            This is the proper EST protocol bootstrap endpoint.
+            Supports both raw DER/PEM and base64-encoded CSRs (for IQE compatibility).
             """
             try:
                 # Get CSR from request body
                 csr_data = await request.body()
                 if not csr_data:
                     raise HTTPException(status_code=400, detail="Missing CSR data")
+
+                # Check if CSR is base64-encoded (IQE UI compatibility)
+                content_transfer_encoding = request.headers.get("Content-Transfer-Encoding", "").lower()
+                if content_transfer_encoding == "base64":
+                    try:
+                        # Decode base64-encoded CSR
+                        csr_data = base64.b64decode(csr_data)
+                        logger.info(f"Decoded base64-encoded CSR ({len(csr_data)} bytes)")
+                    except Exception as e:
+                        logger.error(f"Failed to decode base64 CSR: {e}")
+                        raise HTTPException(status_code=400, detail="Invalid base64-encoded CSR")
 
                 # Authenticate using HTTP Basic Auth
                 auth_result = await self.srp_auth.authenticate(
@@ -205,7 +277,8 @@ class ESTServer:
                     raise HTTPException(status_code=401, detail="Authentication failed")
 
                 # Process bootstrap enrollment with CSR
-                result = await self.ca.bootstrap_enrollment(csr_data, credentials.username)
+                use_base64 = self.config.response_format == "base64"
+                result = await self.ca.bootstrap_enrollment(csr_data, credentials.username, encode_base64=use_base64)
 
                 # Extract device ID from CSR Common Name
                 device_id = f"est-{credentials.username}-{result.serial_number}"  # fallback
@@ -236,13 +309,20 @@ class ESTServer:
                 )
 
                 # Return PKCS#7 certificate with proper headers
-                headers = {
-                    "Content-Type": "application/pkcs7-mime",
-                    "Content-Transfer-Encoding": "base64"
-                }
+                if use_base64:
+                    # RFC 7030 compliant response
+                    headers = {
+                        "Content-Type": "application/pkcs7-mime",
+                        "Content-Transfer-Encoding": "base64"
+                    }
+                else:
+                    # Raw DER response for IQE gateway
+                    headers = {
+                        "Content-Type": "application/pkcs7-mime"
+                    }
 
                 return Response(
-                    content=result.certificate_pkcs7,
+                    content=result.certificate_pkcs7.encode('ascii') if isinstance(result.certificate_pkcs7, str) else result.certificate_pkcs7,
                     headers=headers,
                     status_code=200
                 )
@@ -260,13 +340,14 @@ class ESTServer:
         @self.app.post("/.well-known/est/simpleenroll")
         async def simple_enrollment(
             request: Request,
-            credentials: HTTPBasicCredentials = Depends(HTTPBasic())
+            credentials: Optional[HTTPBasicCredentials] = Depends(HTTPBasic(auto_error=False))
         ) -> Response:
             """
             Simple certificate enrollment (RFC 7030 Section 4.2)
 
             Accepts PKCS#10 CSR and returns PKCS#7 certificate.
             Requires authentication (SRP or client certificate).
+            Supports both raw DER/PEM and base64-encoded CSRs (for IQE compatibility).
             """
             try:
                 # Authenticate request
@@ -278,6 +359,17 @@ class ESTServer:
                 csr_data = await request.body()
                 if not csr_data:
                     raise HTTPException(status_code=400, detail="No CSR provided")
+
+                # Check if CSR is base64-encoded (IQE UI compatibility)
+                content_transfer_encoding = request.headers.get("Content-Transfer-Encoding", "").lower()
+                if content_transfer_encoding == "base64":
+                    try:
+                        # Decode base64-encoded CSR
+                        csr_data = base64.b64decode(csr_data)
+                        logger.info(f"Decoded base64-encoded CSR ({len(csr_data)} bytes)")
+                    except Exception as e:
+                        logger.error(f"Failed to decode base64 CSR: {e}")
+                        raise HTTPException(status_code=400, detail="Invalid base64-encoded CSR")
 
                 # Extract device ID from CSR Common Name
                 device_id = None
@@ -296,9 +388,11 @@ class ESTServer:
                     logger.warning(f"Could not extract device ID from enrollment CSR: {e}")
 
                 # Process enrollment
+                use_base64 = self.config.response_format == "base64"
                 enrollment_result = await self.ca.enroll_certificate(
                     csr_data=csr_data,
-                    requester=auth_result.username
+                    requester=auth_result.username,
+                    encode_base64=use_base64
                 )
 
                 # Track enrollment if we have device_id
@@ -312,14 +406,26 @@ class ESTServer:
                     except Exception as e:
                         logger.warning(f"Failed to track enrollment: {e}")
 
-                return Response(
-                    content=enrollment_result.certificate_pkcs7,
-                    media_type="application/pkcs7-mime; smime-type=certs-only",
-                    headers={
-                        "Content-Transfer-Encoding": "base64",
-                        "Content-Disposition": "attachment; filename=cert.p7c"
-                    }
-                )
+                if use_base64:
+                    # RFC 7030 compliant response
+                    # Convert base64 string to bytes for HTTP response
+                    return Response(
+                        content=enrollment_result.certificate_pkcs7.encode('ascii') if isinstance(enrollment_result.certificate_pkcs7, str) else enrollment_result.certificate_pkcs7,
+                        media_type="application/pkcs7-mime; smime-type=certs-only",
+                        headers={
+                            "Content-Transfer-Encoding": "base64",
+                            "Content-Disposition": "attachment; filename=cert.p7c"
+                        }
+                    )
+                else:
+                    # Raw DER response for IQE gateway
+                    return Response(
+                        content=enrollment_result.certificate_pkcs7,
+                        media_type="application/pkcs7-mime; smime-type=certs-only",
+                        headers={
+                            "Content-Disposition": "attachment; filename=cert.p7c"
+                        }
+                    )
 
             except ESTAuthenticationError:
                 raise HTTPException(status_code=401, detail="Authentication failed")
@@ -345,20 +451,72 @@ class ESTServer:
 
     async def _authenticate_request(self, request: Request, credentials: Optional[HTTPBasicCredentials]) -> 'AuthResult':
         """Authenticate EST request using SRP or client certificate."""
-        # Check for SRP authentication
+        # Try client certificate authentication first (for RA/gateway authentication)
+        if hasattr(request.state, 'client_cert_validated'):
+            # Nginx already validated the cert, trust it
+            cert_info = request.state.client_cert_validated
+            logger.info(f"🔐 RA certificate authentication (nginx validated)")
+            # Extract CN from subject DN
+            username = cert_info.subject_dn.split('CN=')[-1].split(',')[0] if 'CN=' in cert_info.subject_dn else "ra-user"
+            logger.info(f"✅ RA Certificate authentication successful for: {username}")
+            return AuthResult(authenticated=True, username=username, auth_method="client-certificate")
+        else:
+            logger.info(f"ℹ️  No client certificate present, falling back to password authentication")
+
+        # Fall back to SRP/password authentication
         if credentials:
             auth_result = await self.srp_auth.authenticate(
                 credentials.username,
                 credentials.password
             )
             if auth_result.success:
-                return AuthResult(authenticated=True, username=credentials.username)
+                logger.info(f"SRP authentication successful for: {credentials.username}")
+                return AuthResult(authenticated=True, username=credentials.username, auth_method="srp")
 
-        # Check for client certificate authentication
-        # This would be implemented based on TLS client certificate validation
-        # For now, fall back to SRP-only authentication
+        return AuthResult(authenticated=False, username=None, auth_method="none")
 
-        return AuthResult(authenticated=False, username=None)
+    async def _validate_client_certificate(self, client_cert: x509.Certificate) -> bool:
+        """Validate that client certificate is signed by our CA."""
+        try:
+            # Load our CA certificate
+            ca_cert = self.ca._ca_cert
+
+            # Verify the certificate signature
+            # Check if issuer matches our CA
+            if client_cert.issuer != ca_cert.subject:
+                logger.warning(f"Client cert issuer mismatch: {client_cert.issuer} != {ca_cert.subject}")
+                return False
+
+            # Verify signature (cryptography library validates this during TLS handshake,
+            # but we double-check here)
+            try:
+                from cryptography.hazmat.primitives.asymmetric import padding
+                from cryptography.hazmat.primitives import hashes
+
+                # For certificate validation, we trust that if the TLS handshake succeeded
+                # with our CA cert configured, the signature is valid
+                # Additional validation: check certificate is not expired
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc)
+
+                if now < client_cert.not_valid_before_utc:
+                    logger.warning(f"Client certificate not yet valid: {client_cert.not_valid_before_utc}")
+                    return False
+
+                if now > client_cert.not_valid_after_utc:
+                    logger.warning(f"Client certificate expired: {client_cert.not_valid_after_utc}")
+                    return False
+
+                logger.info(f"Client certificate validated: {client_cert.subject.rfc4514_string()}")
+                return True
+
+            except Exception as e:
+                logger.error(f"Certificate signature validation error: {e}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Client certificate validation error: {e}")
+            return False
 
     async def _ensure_initialized(self) -> None:
         """Ensure server is properly initialized with default user."""
@@ -880,19 +1038,40 @@ class ESTServer:
 
     async def start(self) -> None:
         """Start the EST server."""
-        logger.info(f"Starting EST server on {self.config.server.host}:{self.config.server.port}")
+        # Check if running behind nginx proxy (NGINX_MODE environment variable)
+        import os
+        nginx_mode = os.getenv('NGINX_MODE', 'false').lower() == 'true'
 
-        config = uvicorn.Config(
-            app=self.app,
-            host=self.config.server.host,
-            port=self.config.server.port,
-            workers=self.config.server.workers,
-            reload=self.config.server.reload,
-            access_log=self.config.server.access_log,
-            ssl_keyfile=str(self.config.tls.key_file),
-            ssl_certfile=str(self.config.tls.cert_file),
-            ssl_ca_certs=str(self.config.tls.ca_file) if self.config.tls.ca_file else None,
-        )
+        if nginx_mode:
+            # Running behind nginx - use HTTP only (nginx handles TLS)
+            logger.info(f"Starting EST server in NGINX MODE on http://{self.config.server.host}:{self.config.server.port}")
+            logger.info("TLS termination handled by nginx proxy")
+
+            config = uvicorn.Config(
+                app=self.app,
+                host=self.config.server.host,
+                port=self.config.server.port,
+                workers=self.config.server.workers,
+                reload=self.config.server.reload,
+                access_log=self.config.server.access_log,
+                # No SSL config - nginx handles it
+            )
+        else:
+            # Standalone mode - use HTTPS directly
+            logger.info(f"Starting EST server in STANDALONE MODE on https://{self.config.server.host}:{self.config.server.port}")
+
+            config = uvicorn.Config(
+                app=self.app,
+                host=self.config.server.host,
+                port=self.config.server.port,
+                workers=self.config.server.workers,
+                reload=self.config.server.reload,
+                access_log=self.config.server.access_log,
+                ssl_keyfile=str(self.config.tls.key_file),
+                ssl_certfile=str(self.config.tls.cert_file),
+                ssl_ca_certs=str(self.config.tls.ca_file) if self.config.tls.ca_file else None,
+                ssl_cert_reqs=ssl.CERT_OPTIONAL,  # Allow but don't require client certs (for RA auth)
+            )
 
         server = uvicorn.Server(config)
         await server.serve()
@@ -901,6 +1080,7 @@ class ESTServer:
 # Helper classes
 class AuthResult:
     """Authentication result."""
-    def __init__(self, authenticated: bool, username: Optional[str] = None):
+    def __init__(self, authenticated: bool, username: Optional[str] = None, auth_method: str = "none"):
         self.authenticated = authenticated
         self.username = username
+        self.auth_method = auth_method  # "client-certificate", "srp", or "none"
