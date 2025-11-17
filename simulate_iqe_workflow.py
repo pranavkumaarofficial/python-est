@@ -250,7 +250,7 @@ update_config=1
 
 # WPA2/WPA3 Enterprise with EAP-TLS (Certificate-based Authentication)
 network={{
-    ssid="Ferrari2"                                # WiFi SSID
+    ssid="INTEROP_RADIUS_WLAN"                     # WiFi SSID
     scan_ssid=1                                    # Scan for hidden SSIDs
     key_mgmt=WPA-EAP                               # WPA2/WPA3 Enterprise
     eap=TLS                                        # EAP-TLS (certificate auth)
