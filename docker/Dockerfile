@@ -20,9 +20,6 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY src/ ./src/
 COPY pyproject.toml ./
 COPY README.md ./
-COPY generate_certificates_python.py ./
-COPY generate_ra_certificate.py ./
-COPY create_iqe_user.py ./
 
 # Install build tools and package
 RUN pip install --no-cache-dir hatchling && \

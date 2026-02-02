@@ -525,514 +525,633 @@ class ESTServer:
             self._initialized = True
 
     def _get_comprehensive_stats_html(self, stats) -> str:
-        """Generate minimalistic server statistics dashboard."""
+        """Generate modern Interop EST Server dashboard."""
+
+        # Calculate success rate
+        success_rate = 100
+        if stats.total_requests > 0:
+            success_rate = round(((stats.total_requests - stats.failed_requests) / stats.total_requests) * 100)
 
         # Generate device rows
-        device_rows = ""
-        for device in stats.recent_devices:
-            status_color = "#007acc" if device.status == "enrolled" else "#94a3b8"
-            status_text = "Enrolled" if device.status == "enrolled" else "Bootstrap"
-            download_buttons = "—"  # Removed insecure download endpoints
+        device_rows_html = ""
+        if stats.recent_devices:
+            for device in stats.recent_devices:
+                badge_class = 'badge-success' if device.status == 'enrolled' else 'badge-warning'
+                device_rows_html += f'''
+                            <tr>
+                                <td><strong>{device.device_id}</strong></td>
+                                <td>{device.username}</td>
+                                <td>{device.ip_address}</td>
+                                <td>
+                                    <span class="badge {badge_class}">
+                                        {device.status}
+                                    </span>
+                                </td>
+                                <td>{self._to_ist(device.last_activity)}</td>
+                            </tr>'''
+        else:
+            device_rows_html = '<tr><td colspan="5" class="empty-state">No devices enrolled</td></tr>'
 
-            device_rows += f'''
-            <tr class="device-row">
-                <td>{device.device_id}</td>
-                <td>{device.username}</td>
-                <td>{device.ip_address}</td>
-                <td><span class="status-badge" style="color: {status_color};">{status_text}</span></td>
-                <td>{self._to_ist(device.bootstrap_time)}</td>
-                <td>{self._to_ist(device.enrollment_time)}</td>
-                <td>{download_buttons}</td>
-            </tr>
-            '''
+        # Generate activity log
+        activity_log_html = ""
+        if stats.recent_devices:
+            recent = stats.recent_devices[-10:] if len(stats.recent_devices) > 10 else stats.recent_devices
+            for device in recent:
+                activity_log_html += f'''
+                        <div class="log-entry">
+                            <span class="log-time">{self._to_ist(device.last_activity)}</span>
+                            <span class="log-device">{device.device_id}</span>
+                            <span class="log-status">{device.status}</span>
+                        </div>'''
+        else:
+            activity_log_html = '<div class="log-entry"><span class="log-time">--:--:--</span> No recent activity</div>'
 
-        if not device_rows:
-            device_rows = '<tr><td colspan="7" class="empty-state">No devices connected</td></tr>'
-
-        # Generate recent activity summary
-        recent_activity = ""
-        recent_devices = stats.recent_devices[-5:] if stats.recent_devices else []
-        for device in recent_devices:
-            activity_time = self._to_ist(device.last_activity)
-            recent_activity += f'''
-            <div class="activity-item">
-                <span class="activity-device">{device.device_id}</span>
-                <span class="activity-action">{device.status}</span>
-                <span class="activity-time">{activity_time}</span>
-            </div>
-            '''
-
-        if not recent_activity:
-            recent_activity = '<div class="activity-item empty">No recent activity</div>'
+        # Parse uptime for live ticker
+        uptime_parts = stats.uptime.split(':')
+        uptime_seconds = int(uptime_parts[0]) * 3600 + int(uptime_parts[1]) * 60 + int(uptime_parts[2])
 
         return f'''<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EST Dashboard</title>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <title>Interop EST Server</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * {{
-            margin: 0; padding: 0; box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+
+        :root {{
+            --azure: #007FFF;
+            --azure-light: #4CA6FF;
+            --azure-dark: #0066CC;
+            --bg: #FAFBFC;
+            --bg-card: #FFFFFF;
+            --text: #1A1D1F;
+            --text-muted: #6F767E;
+            --border: #E4E7EB;
+            --success: #16A34A;
+            --warning: #F59E0B;
+            --error: #DC2626;
+            --shadow: 0 1px 3px rgba(0,0,0,0.04);
+            --shadow-lg: 0 10px 40px rgba(0,0,0,0.08);
         }}
 
         body {{
             font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: #fafbfc;
-            color: #1f2937;
+            background: var(--bg);
+            color: var(--text);
             line-height: 1.6;
-            font-size: 14px;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
         }}
 
         .container {{
-            max-width: 1400px;
+            max-width: 1600px;
             margin: 0 auto;
-            padding: 32px;
-            animation: fadeIn 0.6s ease-out;
+            padding: 2.5rem;
         }}
 
-        @keyframes fadeIn {{
-            from {{ opacity: 0; transform: translateY(20px); }}
-            to {{ opacity: 1; transform: translateY(0); }}
+        /* Header */
+        header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2.5rem;
+            background: var(--bg-card);
+            padding: 1.75rem 2.5rem;
+            border-radius: 16px;
+            box-shadow: var(--shadow);
+            border: 2px solid var(--border);
         }}
 
-        .header {{
-            text-align: center;
-            margin-bottom: 48px;
-            padding-bottom: 24px;
-            border-bottom: 1px solid #e5e7eb;
+        .logo h1 {{
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--text);
+            letter-spacing: -0.02em;
         }}
 
-        .header h1 {{
-            font-size: 32px;
-            font-weight: 600;
-            color: #111827;
-            margin-bottom: 8px;
-            letter-spacing: -0.025em;
+        .logo small {{
+            display: block;
+            font-size: 14px;
+            color: var(--text-muted);
+            font-weight: 500;
+            margin-top: 2px;
         }}
 
-        .header p {{
-            color: #6b7280;
-            font-size: 16px;
-            font-weight: 400;
+        .header-actions {{
+            display: flex;
+            gap: 0.875rem;
         }}
 
-        .uptime {{
+        .btn {{
+            padding: 1rem 2rem;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
             display: inline-flex;
             align-items: center;
-            gap: 8px;
-            background: #f3f4f6;
-            padding: 6px 12px;
-            border-radius: 6px;
-            font-size: 13px;
-            color: #374151;
-            margin-top: 12px;
+            gap: 0.5rem;
+            text-decoration: none;
+            font-family: 'DM Sans', sans-serif;
+            letter-spacing: -0.01em;
         }}
 
+        .btn-primary {{
+            background: var(--azure);
+            color: white;
+            box-shadow: 0 4px 14px rgba(0, 127, 255, 0.25);
+        }}
+
+        .btn-primary:hover {{
+            background: var(--azure-dark);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 127, 255, 0.35);
+        }}
+
+        .btn-primary:active {{
+            transform: translateY(0);
+        }}
+
+        .btn-secondary {{
+            background: white;
+            color: var(--text);
+            border: 2px solid var(--border);
+        }}
+
+        .btn-secondary:hover {{
+            border-color: var(--azure);
+            color: var(--azure);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }}
+
+        .btn-danger {{
+            background: var(--error);
+            color: white;
+        }}
+
+        .btn-danger:hover {{
+            background: #B91C1C;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(220, 38, 38, 0.35);
+        }}
+
+        /* Stats Grid */
         .stats-grid {{
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-            gap: 16px;
-            margin-bottom: 48px;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2.5rem;
         }}
 
         .stat-card {{
-            background: white;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            padding: 20px;
-            text-align: center;
-            transition: all 0.2s ease;
-        }}
-
-        .stat-card:hover {{
-            border-color: #007acc;
-            box-shadow: 0 4px 12px rgba(0, 122, 204, 0.1);
-            transform: translateY(-2px);
-        }}
-
-        .stat-card h3 {{
-            font-size: 13px;
-            font-weight: 500;
-            color: #6b7280;
-            margin-bottom: 8px;
-            text-transform: uppercase;
-            letter-spacing: 0.025em;
-        }}
-
-        .stat-card p {{
-            font-size: 28px;
-            font-weight: 600;
-            color: #007acc;
-        }}
-
-        .section {{
-            background: white;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            margin-bottom: 24px;
+            background: var(--bg-card);
+            border: 2px solid var(--border);
+            border-radius: 16px;
+            padding: 2.25rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
             overflow: hidden;
         }}
 
-        .section-header {{
-            padding: 20px 24px;
-            border-bottom: 1px solid #e5e7eb;
-            background: #f9fafb;
+        .stat-card::before {{
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 5px;
+            background: linear-gradient(90deg, var(--azure), var(--azure-light));
         }}
 
-        .section-header h2 {{
-            font-size: 18px;
+        .stat-card:hover {{
+            transform: translateY(-6px);
+            box-shadow: var(--shadow-lg);
+            border-color: var(--azure);
+        }}
+
+        .stat-label {{
+            font-size: 13px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 700;
+            margin-bottom: 1rem;
+        }}
+
+        .stat-value {{
+            font-size: 48px;
+            font-weight: 700;
+            color: var(--text);
+            line-height: 1;
+            margin-bottom: 0.625rem;
+            font-variant-numeric: tabular-nums;
+        }}
+
+        .stat-change {{
+            font-size: 14px;
+            color: var(--text-muted);
             font-weight: 600;
-            color: #111827;
         }}
 
-        .devices-table {{
+        /* Grid Layout */
+        .grid-2 {{
+            display: grid;
+            grid-template-columns: 1.5fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }}
+
+        .panel {{
+            background: var(--bg-card);
+            border: 2px solid var(--border);
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+        }}
+
+        .panel-header {{
+            padding: 1.75rem 2.5rem;
+            border-bottom: 2px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: linear-gradient(to bottom, #FAFBFC, #F8F9FA);
+        }}
+
+        .panel-title {{
+            font-size: 19px;
+            font-weight: 700;
+            color: var(--text);
+            letter-spacing: -0.01em;
+        }}
+
+        /* Table */
+        table {{
             width: 100%;
             border-collapse: collapse;
         }}
 
-        .devices-table th {{
-            background: #f9fafb;
-            padding: 16px 24px;
+        thead th {{
             text-align: left;
-            font-size: 13px;
-            font-weight: 600;
-            color: #374151;
+            padding: 1.5rem 2.5rem;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-muted);
             text-transform: uppercase;
-            letter-spacing: 0.025em;
-            border-bottom: 1px solid #e5e7eb;
+            letter-spacing: 1px;
+            background: #F8F9FA;
         }}
 
-        .devices-table td {{
-            padding: 16px 24px;
-            border-bottom: 1px solid #f3f4f6;
-            font-size: 14px;
+        tbody tr {{
+            border-bottom: 1px solid var(--border);
+            transition: background 0.2s;
         }}
 
-        .device-row:hover {{
-            background: #f9fafb;
+        tbody tr:hover {{
+            background: #F8F9FA;
         }}
 
-        .status-badge {{
+        tbody tr:last-child {{
+            border-bottom: none;
+        }}
+
+        tbody td {{
+            padding: 1.5rem 2.5rem;
+            font-size: 15px;
             font-weight: 500;
-            font-size: 13px;
         }}
 
+        .badge {{
+            display: inline-block;
+            padding: 0.5rem 1.125rem;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+
+        .badge-success {{
+            background: #DCFCE7;
+            color: var(--success);
+        }}
+
+        .badge-warning {{
+            background: #FEF3C7;
+            color: #D97706;
+        }}
+
+        /* Live indicator */
+        .live-indicator {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.625rem 1.25rem;
+            background: #DCFCE7;
+            color: var(--success);
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }}
+
+        .live-dot {{
+            width: 10px;
+            height: 10px;
+            background: var(--success);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }}
+
+        @keyframes pulse {{
+            0%, 100% {{ opacity: 1; transform: scale(1); }}
+            50% {{ opacity: 0.6; transform: scale(0.95); }}
+        }}
+
+        /* Activity Log */
+        .activity-log {{
+            max-height: 520px;
+            overflow-y: auto;
+            padding: 1.5rem 2rem;
+        }}
+
+        .log-entry {{
+            padding: 1.125rem;
+            margin-bottom: 0.5rem;
+            border-left: 4px solid var(--azure);
+            background: #F8F9FA;
+            border-radius: 8px;
+            font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            transition: all 0.2s;
+        }}
+
+        .log-entry:hover {{
+            background: white;
+            box-shadow: var(--shadow);
+        }}
+
+        .log-time {{
+            color: var(--text-muted);
+            margin-right: 1rem;
+            font-weight: 700;
+        }}
+
+        .log-device {{
+            color: var(--azure);
+            font-weight: 700;
+            margin-right: 0.75rem;
+        }}
+
+        .log-status {{
+            color: var(--text);
+            font-weight: 600;
+        }}
+
+        /* Empty State */
         .empty-state {{
             text-align: center;
-            color: #9ca3af;
-            font-style: italic;
-            padding: 32px;
+            padding: 4rem;
+            color: var(--text-muted);
+            font-size: 15px;
+            font-weight: 500;
         }}
 
+        /* Endpoints */
         .endpoints-grid {{
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 16px;
-            padding: 24px;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.25rem;
+            padding: 2rem;
         }}
 
         .endpoint {{
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            padding: 16px;
-            transition: all 0.2s ease;
+            background: #F8F9FA;
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            padding: 1.75rem;
+            transition: all 0.25s;
         }}
 
         .endpoint:hover {{
-            border-color: #007acc;
-            background: #f0f9ff;
-        }}
-
-        .endpoint strong {{
-            color: #007acc;
-            font-weight: 600;
-            font-size: 13px;
-            display: block;
-            margin-bottom: 4px;
-        }}
-
-        .endpoint span {{
-            color: #64748b;
-            font-size: 12px;
-        }}
-
-        .api-nav {{
-            display: flex;
-            gap: 12px;
-            padding: 24px;
-            background: #f9fafb;
-        }}
-
-        .api-link {{
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 8px 16px;
+            border-color: var(--azure);
             background: white;
-            color: #374151;
-            text-decoration: none;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            font-size: 13px;
-            font-weight: 500;
-            transition: all 0.2s ease;
+            transform: translateY(-3px);
+            box-shadow: var(--shadow-lg);
         }}
 
-        .api-link:hover {{
-            background: #007acc;
-            color: white;
-            border-color: #007acc;
-            transform: translateY(-1px);
+        .endpoint-method {{
+            font-weight: 700;
+            margin-bottom: 0.625rem;
+            font-size: 15px;
+            letter-spacing: -0.01em;
         }}
 
-        .download-btn {{
-            display: inline-block;
-            padding: 4px 8px;
-            background: #f0f9ff;
-            color: #007acc;
-            text-decoration: none;
-            border: 1px solid #bae6fd;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 500;
-            margin: 0 2px;
-            transition: all 0.2s ease;
-        }}
+        .endpoint-method.get {{ color: var(--success); }}
+        .endpoint-method.post {{ color: var(--azure); }}
 
-        .download-btn:hover {{
-            background: #007acc;
-            color: white;
-            border-color: #007acc;
-        }}
-
-        .activity-item {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 12px;
-            margin: 4px 0;
-            background: #f9fafb;
-            border-radius: 4px;
-            font-size: 13px;
-        }}
-
-        .activity-item.empty {{
-            justify-content: center;
-            color: #9ca3af;
-            font-style: italic;
-        }}
-
-        .activity-device {{
-            font-weight: 500;
-            color: #374151;
-        }}
-
-        .activity-action {{
-            color: #007acc;
-            font-weight: 500;
-        }}
-
-        .activity-time {{
-            color: #6b7280;
-            font-size: 12px;
-        }}
-
-        .inline-section {{
-            background: white;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            margin-bottom: 24px;
-            overflow: hidden;
-        }}
-
-        .inline-grid {{
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 24px;
-            padding: 24px;
-        }}
-
-        .data-block {{
-            background: #f9fafb;
-            border: 1px solid #e5e7eb;
-            border-radius: 6px;
-            padding: 16px;
-        }}
-
-        .data-block h3 {{
+        .endpoint-desc {{
+            color: var(--text-muted);
             font-size: 14px;
-            font-weight: 600;
-            color: #374151;
-            margin-bottom: 12px;
-        }}
-
-        .refresh-btn {{
-            position: fixed;
-            top: 24px;
-            right: 24px;
-            background: white;
-            color: #374151;
-            border: 1px solid #d1d5db;
-            padding: 8px 12px;
-            border-radius: 6px;
-            text-decoration: none;
-            font-size: 13px;
             font-weight: 500;
-            transition: all 0.2s ease;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
         }}
 
-        .refresh-btn:hover {{
-            background: #f3f4f6;
-            border-color: #9ca3af;
-        }}
-
-        .credentials {{
-            text-align: center;
-            margin-top: 32px;
-            padding: 16px;
-            background: #f0f9ff;
-            border: 1px solid #bae6fd;
-            border-radius: 6px;
-            font-size: 13px;
-            color: #0369a1;
-        }}
-
-        .credentials strong {{
-            font-weight: 600;
+        /* Responsive */
+        @media (max-width: 1024px) {{
+            .grid-2 {{
+                grid-template-columns: 1fr;
+            }}
         }}
 
         @media (max-width: 768px) {{
-            .container {{ padding: 16px; }}
-            .stats-grid {{ grid-template-columns: repeat(2, 1fr); }}
-            .endpoints-grid {{ grid-template-columns: 1fr; }}
-            .api-nav {{ flex-wrap: wrap; }}
+            .container {{ padding: 1.5rem; }}
+            .stats-grid {{ grid-template-columns: 1fr; }}
+            header {{
+                flex-direction: column;
+                gap: 1.5rem;
+                padding: 1.5rem;
+            }}
+            .header-actions {{
+                width: 100%;
+                flex-direction: column;
+            }}
+            .btn {{
+                flex: 1;
+                justify-content: center;
+                padding: 1rem;
+            }}
         }}
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {{
+            width: 12px;
+            height: 12px;
+        }}
+
+        ::-webkit-scrollbar-track {{
+            background: var(--bg);
+        }}
+
+        ::-webkit-scrollbar-thumb {{
+            background: #CBD5E1;
+            border-radius: 6px;
+        }}
+
+        ::-webkit-scrollbar-thumb:hover {{
+            background: #94A3B8;
+        }}
+
     </style>
-    <script>
-        setTimeout(() => {{
-            document.body.style.opacity = '0.7';
-            setTimeout(() => location.reload(), 200);
-        }}, 30000);
-    </script>
 </head>
 <body>
-    <a href="/" class="refresh-btn">Refresh</a>
-
     <div class="container">
-        <div class="header">
-            <h1>EST Server</h1>
-            <p>Certificate Authority Dashboard</p>
-            <div class="uptime">Uptime: {stats.uptime}</div>
-        </div>
+        <header>
+            <div class="logo">
+                <h1>Interop EST Server</h1>
+                <small>RFC 7030 Certificate Enrollment Protocol</small>
+            </div>
+            <div class="header-actions">
+                <a href="/api/devices" class="btn btn-secondary" download="devices.json">
+                    Export Data
+                </a>
+                <a href="/" class="btn btn-primary">
+                    Refresh
+                </a>
+                <button class="btn btn-danger" onclick="if(confirm('This will delete all device enrollments. Continue?')){{alert('Database reset functionality requires API implementation');}}">
+                    Reset Database
+                </button>
+            </div>
+        </header>
 
+        <!-- Stats -->
         <div class="stats-grid">
             <div class="stat-card">
-                <h3>Devices</h3>
-                <p>{stats.total_devices}</p>
+                <div class="stat-label">Total Devices</div>
+                <div class="stat-value">{stats.total_devices}</div>
+                <div class="stat-change">Active enrollments</div>
             </div>
             <div class="stat-card">
-                <h3>Enrolled</h3>
-                <p>{stats.enrolled_devices}</p>
+                <div class="stat-label">Certificates Issued</div>
+                <div class="stat-value">{stats.certificates_issued}</div>
+                <div class="stat-change">Bootstrap + Enrollment</div>
             </div>
             <div class="stat-card">
-                <h3>Active</h3>
-                <p>{stats.active_devices}</p>
+                <div class="stat-label">Server Uptime</div>
+                <div class="stat-value" id="uptime-display">{stats.uptime}</div>
+                <div class="stat-change"><span class="live-dot"></span> Live Session</div>
             </div>
             <div class="stat-card">
-                <h3>Requests</h3>
-                <p>{stats.total_requests}</p>
-            </div>
-            <div class="stat-card">
-                <h3>Certificates</h3>
-                <p>{stats.certificates_issued}</p>
-            </div>
-            <div class="stat-card">
-                <h3>Bootstrap</h3>
-                <p>{stats.bootstrap_certificates}</p>
-            </div>
-            <div class="stat-card">
-                <h3>Enrollment</h3>
-                <p>{stats.enrollment_certificates}</p>
-            </div>
-            <div class="stat-card">
-                <h3>Failed</h3>
-                <p>{stats.failed_requests}</p>
+                <div class="stat-label">Success Rate</div>
+                <div class="stat-value">{success_rate}%</div>
+                <div class="stat-change">{stats.total_requests} total requests</div>
             </div>
         </div>
 
-        <div class="section">
-            <div class="section-header">
-                <h2>Connected Devices</h2>
+        <!-- Main Grid -->
+        <div class="grid-2">
+            <!-- Devices Panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2 class="panel-title">Enrolled Devices</h2>
+                    <span class="live-indicator">
+                        <span class="live-dot"></span>
+                        LIVE
+                    </span>
+                </div>
+                <div class="panel-body" style="padding: 0;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Device ID</th>
+                                <th>Username</th>
+                                <th>IP Address</th>
+                                <th>Status</th>
+                                <th>Last Activity</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {device_rows_html}
+                        </tbody>
+                    </table>
+                </div>
             </div>
-            <table class="devices-table">
-                <thead>
-                    <tr>
-                        <th>Device ID</th>
-                        <th>User</th>
-                        <th>IP Address</th>
-                        <th>Status</th>
-                        <th>Bootstrap</th>
-                        <th>Enrollment</th>
-                        <th>Download</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {device_rows}
-                </tbody>
-            </table>
-        </div>
 
-        <div class="section">
-            <div class="section-header">
-                <h2>Protocol Endpoints</h2>
-            </div>
-            <div class="endpoints-grid">
-                <div class="endpoint">
-                    <strong>GET /.well-known/est/cacerts</strong>
-                    <span>CA certificate distribution</span>
+            <!-- Activity Log Panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2 class="panel-title">Recent Activity</h2>
+                    <span class="badge badge-success">{len(stats.recent_devices)} events</span>
                 </div>
-                <div class="endpoint">
-                    <strong>POST /.well-known/est/bootstrap</strong>
-                    <span>Bootstrap enrollment (CSR required)</span>
-                </div>
-                <div class="endpoint">
-                    <strong>POST /.well-known/est/simpleenroll</strong>
-                    <span>Certificate enrollment</span>
-                </div>
-                <div class="endpoint">
-                    <strong>POST /.well-known/est/simplereenroll</strong>
-                    <span>Certificate re-enrollment</span>
-                </div>
-            </div>
-        </div>
-
-        <div class="inline-section">
-            <div class="section-header">
-                <h2>System Overview</h2>
-            </div>
-            <div class="inline-grid">
-                <div class="data-block">
-                    <h3>Recent Activity</h3>
-                    {recent_activity}
-                </div>
-                <div class="data-block">
-                    <h3>Quick Actions</h3>
-                    <div style="display: flex; flex-direction: column; gap: 8px;">
-                        <a href="/api/stats" class="api-link">View JSON Stats</a>
-                        <a href="/api/devices" class="api-link">Export Device List</a>
+                <div class="panel-body" style="padding: 0;">
+                    <div class="activity-log">
+                        {activity_log_html}
                     </div>
                 </div>
             </div>
         </div>
 
-        <div class="credentials">
-            <strong>Bootstrap Credentials:</strong> estuser / estpass123
+        <!-- Endpoints Panel -->
+        <div class="panel">
+            <div class="panel-header">
+                <h2 class="panel-title">EST Protocol Endpoints</h2>
+                <span class="live-indicator">
+                    <span class="live-dot"></span>
+                    LIVE
+                </span>
+            </div>
+            <div class="endpoints-grid">
+                <div class="endpoint">
+                    <div class="endpoint-method get">GET /cacerts</div>
+                    <div class="endpoint-desc">Download CA certificates</div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-method post">POST /bootstrap</div>
+                    <div class="endpoint-desc">Initial device enrollment</div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-method post">POST /simpleenroll</div>
+                    <div class="endpoint-desc">Certificate enrollment/renewal</div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-method post">POST /simplereenroll</div>
+                    <div class="endpoint-desc">Certificate re-enrollment</div>
+                </div>
+            </div>
         </div>
     </div>
+
+    <script>
+        // Live uptime ticker
+        let uptimeSeconds = {uptime_seconds};
+        const uptimeElement = document.getElementById('uptime-display');
+
+        function updateUptime() {{
+            uptimeSeconds++;
+            const hours = Math.floor(uptimeSeconds / 3600);
+            const minutes = Math.floor((uptimeSeconds % 3600) / 60);
+            const seconds = uptimeSeconds % 60;
+
+            uptimeElement.textContent = `${{hours}}:${{String(minutes).padStart(2, '0')}}:${{String(seconds).padStart(2, '0')}}`;
+        }}
+
+        // Update uptime every second
+        setInterval(updateUptime, 1000);
+
+        // Auto-reload every 30 seconds
+        setTimeout(() => {{
+            window.location.reload();
+        }}, 30000);
+    </script>
 </body>
 </html>'''
 

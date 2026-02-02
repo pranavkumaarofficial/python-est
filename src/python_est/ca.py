@@ -354,7 +354,15 @@ class CertificateAuthority:
 
             if encode_base64:
                 # Base64 encode for EST transport as required by RFC 7030
-                pkcs7_b64 = base64.b64encode(pkcs7_der).decode()
+                # Format with line breaks every 64 characters (standard PEM format)
+                # This ensures compatibility with openssl base64 -d command
+                pkcs7_b64_raw = base64.b64encode(pkcs7_der).decode()
+
+                # Insert newlines every 64 characters for proper PEM format
+                pkcs7_b64 = '\n'.join(
+                    pkcs7_b64_raw[i:i+64] for i in range(0, len(pkcs7_b64_raw), 64)
+                )
+
                 logger.debug(f"Created base64-encoded PKCS#7 response with {len(certificates)} certificate(s)")
                 return pkcs7_b64
             else:
